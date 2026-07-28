@@ -1,0 +1,12 @@
+{
+  "name": "奇德芬芳员工端",
+  "appid": "",
+  "description": "奇德芬芳 月子会所员工端（妈妈宝盒复刻 · 高奢金白）",
+  "versionName": "0.1.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "app-plus": { "usingComponents": true, "splashscreen": { "alwaysShowBeforeRender": true, "waiting": true, "autoclose": true } },
+  "mp-weixin": { "appid": "wxf689ac09f9329369", "setting": { "urlCheck": false, "minified": true, "es6": true }, "usingComponents": true, "__usePrivacyCheck__": false },
+  "h5": { "title": "奇德芬芳 · 员工端", "router": { "mode": "hash" }, "maxWidth": 480 },
+  "vueVersion": "3"
+}

@@ -1,0 +1,73 @@
+/* ============================================================
+   把「高奢金白」设计令牌（design-system/tokens.css）映射到
+   Element Plus 2.x 的 CSS 变量层 —— 运行时覆盖，无需重编 SCSS。
+   原则：tokens.css 为唯一色源，组件里不写死色值，保证与三端 uni-app 视觉同源。
+   ============================================================ */
+:root {
+  /* 主色 · 金 */
+  --el-color-primary: var(--gold);
+  --el-color-primary-light-3: #c7ac81;
+  --el-color-primary-light-5: #d3bd9c;
+  --el-color-primary-light-7: #e4d4b9;
+  --el-color-primary-light-8: #efe3cd;
+  --el-color-primary-light-9: #f7efe0;
+  --el-color-primary-dark-2: var(--gold-deep);
+
+  /* 语义状态（金白体系低饱和） */
+  --el-color-success: var(--ok);
+  --el-color-warning: var(--warn);
+  --el-color-danger: var(--danger);
+  --el-color-error: var(--danger);
+
+  /* 文字 */
+  --el-text-color-primary: var(--ink);
+  --el-text-color-regular: #4f4a42;
+  --el-text-color-secondary: var(--ink-2);
+  --el-text-color-placeholder: var(--ink-3);
+  --el-text-color-disabled: #c5bdb0;
+
+  /* 背景 / 填充 */
+  --el-bg-color: var(--paper);
+  --el-bg-color-page: var(--ivory);
+  --el-bg-color-overlay: var(--paper);
+  --el-fill-color-blank: var(--paper);
+  --el-fill-color-light: #f7efe0;
+  --el-fill-color-lighter: #faf4e9;
+
+  /* 描边 · 金色发丝 */
+  --el-border-color: var(--hair);
+  --el-border-color-light: rgba(184, 148, 90, 0.22);
+  --el-border-color-lighter: rgba(184, 148, 90, 0.16);
+  --el-border-color-extra-light: rgba(184, 148, 90, 0.1);
+
+  /* 圆角（克制的奢华） */
+  --el-border-radius-base: 10px;
+  --el-border-radius-small: 8px;
+
+  /* 字体 */
+  --el-font-family: var(--font-sans);
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+body {
+  background: var(--ivory);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+.serif {
+  font-family: var(--font-display);
+}
+
+/* 主 CTA 略带金箔质感（克制） */
+.el-button--primary {
+  --el-button-bg-color: var(--gold);
+  --el-button-border-color: var(--gold);
+  --el-button-hover-bg-color: var(--gold-deep);
+  --el-button-hover-border-color: var(--gold-deep);
+  --el-button-active-bg-color: var(--gold-deep);
+}

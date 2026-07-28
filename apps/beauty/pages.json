@@ -1,0 +1,30 @@
+{
+  "easycom": { "autoscan": true, "custom": { "^yz-(.*)": "@/components/yz-$1/yz-$1.vue" } },
+  "pages": [
+    { "path": "pages/home/home", "style": { "navigationBarTitleText": "工作台", "navigationStyle": "custom" } },
+    { "path": "pages/cashier/cashier", "style": { "navigationBarTitleText": "收银开单", "navigationStyle": "custom" } },
+    { "path": "pages/customers/customers", "style": { "navigationBarTitleText": "客户", "navigationStyle": "custom" } },
+    { "path": "pages/me/me", "style": { "navigationBarTitleText": "我的", "navigationStyle": "custom" } },
+    { "path": "pages/sub/sub", "style": { "navigationBarTitleText": "", "navigationStyle": "custom" } },
+    { "path": "pages/manage/manage", "style": { "navigationBarTitleText": "管理", "navigationStyle": "custom" } }
+  ],
+  "tabBar": {
+    "color": "#A89E8D",
+    "selectedColor": "#8C6A36",
+    "backgroundColor": "#FBF7F0",
+    "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/home/home", "text": "工作台" },
+      { "pagePath": "pages/cashier/cashier", "text": "收银" },
+      { "pagePath": "pages/customers/customers", "text": "客户" },
+      { "pagePath": "pages/me/me", "text": "我的" }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "奇德芬芳 · 科研美容门店端",
+    "navigationBarBackgroundColor": "#FBF7F0",
+    "backgroundColor": "#FBF7F0",
+    "rpxCalcMaxDeviceWidth": 480, "rpxCalcBaseDeviceWidth": 375
+  }
+}

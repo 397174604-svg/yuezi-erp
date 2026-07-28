@@ -1,0 +1,12 @@
+{
+  "name": "奇德芬芳宝妈端",
+  "appid": "",
+  "description": "奇德芬芳 宝妈端（替代安卓APP · 高奢金白）",
+  "versionName": "0.1.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "app-plus": { "usingComponents": true, "splashscreen": { "alwaysShowBeforeRender": true, "waiting": true, "autoclose": true } },
+  "mp-weixin": { "appid": "wx2915bc9221937dd3", "setting": { "urlCheck": false, "minified": true, "es6": true }, "usingComponents": true, "__usePrivacyCheck__": false },
+  "h5": { "title": "奇德芬芳 · 宝妈端", "router": { "mode": "hash" }, "maxWidth": 480 },
+  "vueVersion": "3"
+}

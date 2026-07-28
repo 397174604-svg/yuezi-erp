@@ -1,0 +1,181 @@
+{
+  "easycom": {
+    "autoscan": true,
+    "custom": {
+      "^demo-(.*)": "@/components/demo-$1/demo-$1.vue"
+    }
+  },
+  "pages": [
+    {
+      "path": "pages/launch/launch",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/staff/home/home",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/staff/clients/clients",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/staff/round/round",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/staff/me/me",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/staff/client/client",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/staff/sub/sub",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/rehab/home/home",
+      "style": {
+        "navigationBarTitleText": "工作台",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/rehab/cashier/cashier",
+      "style": {
+        "navigationBarTitleText": "收银开单",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/rehab/customers/customers",
+      "style": {
+        "navigationBarTitleText": "客户",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/rehab/me/me",
+      "style": {
+        "navigationBarTitleText": "我的",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/rehab/sub/sub",
+      "style": {
+        "navigationBarTitleText": "",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/rehab/manage/manage",
+      "style": {
+        "navigationBarTitleText": "管理",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/beauty/home/home",
+      "style": {
+        "navigationBarTitleText": "工作台",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/beauty/cashier/cashier",
+      "style": {
+        "navigationBarTitleText": "收银开单",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/beauty/customers/customers",
+      "style": {
+        "navigationBarTitleText": "客户",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/beauty/me/me",
+      "style": {
+        "navigationBarTitleText": "我的",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/beauty/sub/sub",
+      "style": {
+        "navigationBarTitleText": "",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/beauty/manage/manage",
+      "style": {
+        "navigationBarTitleText": "管理",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/mom/home/home",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/mom/diet/diet",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/mom/mall/mall",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/mom/me/me",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/mom/sub/sub",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/mom/qa/qa",
+      "style": {
+        "navigationBarTitleText": "AI 育儿问答",
+        "navigationStyle": "custom"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "奇德芬芳 · 演示",
+    "navigationBarBackgroundColor": "#FBF7F0",
+    "backgroundColor": "#FBF7F0",
+    "rpxCalcMaxDeviceWidth": 480,
+    "rpxCalcBaseDeviceWidth": 375
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "yue-apps-h5",
+  "private": true,
+  "version": "0.1.0",
+  "description": "奇德芬芳 两端 uni-app 的 H5 本地构建外壳（用 UNI_INPUT_DIR 切 staff/mom；产康已并入员工端 staff，美容 beauty 移出为独立项目不参与构建，代码留 apps/beauty）",
+  "type": "module",
+  "scripts": {
+    "build:all": "npm run build:staff && npm run build:mom",
+    "build:staff": "cross-env UNI_INPUT_DIR=staff uni build -p h5 --outDir h5dist/staff --base ./",
+    "build:mom": "cross-env UNI_INPUT_DIR=mom uni build -p h5 --outDir h5dist/mom --base ./",
+    "dev:staff": "cross-env UNI_INPUT_DIR=staff uni -p h5",
+    "dev:mom": "cross-env UNI_INPUT_DIR=mom uni -p h5",
+    "build:mp:all": "npm run build:mp:staff && npm run build:mp:mom",
+    "build:mp:staff": "cross-env UNI_INPUT_DIR=staff uni build -p mp-weixin --outDir mpdist/staff",
+    "build:mp:mom": "cross-env UNI_INPUT_DIR=mom uni build -p mp-weixin --outDir mpdist/mom && node scripts/copy-mom-room-assets.mjs",
+    "dev:mp:staff": "cross-env UNI_INPUT_DIR=staff uni -p mp-weixin",
+    "dev:mp:mom": "cross-env UNI_INPUT_DIR=mom uni -p mp-weixin",
+    "build:demo": "cross-env UNI_INPUT_DIR=demo uni build -p h5 --outDir h5dist/demo --base ./",
+    "build:mp:demo": "cross-env UNI_INPUT_DIR=demo uni build -p mp-weixin --outDir mpdist/demo"
+  },
+  "dependencies": {
+    "@dcloudio/uni-app": "3.0.0-alpha-1000920260626810",
+    "@dcloudio/uni-components": "3.0.0-alpha-1000920260626810",
+    "@dcloudio/uni-h5": "3.0.0-alpha-1000920260626810",
+    "@dcloudio/uni-mp-weixin": "3.0.0-alpha-1000920260626810",
+    "vue": "^3.4.21"
+  },
+  "devDependencies": {
+    "@dcloudio/uni-mp-vite": "3.0.0-alpha-1000920260626810",
+    "@dcloudio/vite-plugin-uni": "3.0.0-alpha-1000920260626810",
+    "cross-env": "^7.0.3",
+    "sass": "^1.77.0",
+    "vite": "^8.1.0"
+  }
+}

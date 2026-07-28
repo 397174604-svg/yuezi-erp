@@ -1,0 +1,12 @@
+{
+  "name": "奇德芬芳演示",
+  "appid": "",
+  "description": "奇德芬芳 · 一体化演示端（员工/产康/科研美容/宝妈 四端合一，进门选身份）",
+  "versionName": "0.1.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "app-plus": { "usingComponents": true, "splashscreen": { "alwaysShowBeforeRender": true, "waiting": true, "autoclose": true } },
+  "mp-weixin": { "appid": "", "setting": { "urlCheck": false, "minified": true, "es6": true }, "usingComponents": true, "__usePrivacyCheck__": false },
+  "h5": { "title": "奇德芬芳 · 演示", "router": { "mode": "hash" }, "maxWidth": 480 },
+  "vueVersion": "3"
+}

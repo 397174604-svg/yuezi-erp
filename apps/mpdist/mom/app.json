@@ -1,0 +1,54 @@
+{
+  "pages": [
+    "pages/login/login",
+    "pages/home/home",
+    "pages/rooms/reserve",
+    "pages/diet/diet",
+    "pages/mall/mall",
+    "pages/me/me",
+    "pages/sub/sub",
+    "pages/qa/qa",
+    "pages/baby/timeline",
+    "pages/care/mine",
+    "pages/login/set-password",
+    "pages/profile/edit",
+    "pages/profile/onboarding",
+    "pages/family/invite",
+    "pages/entry/qr",
+    "pages/service/requests",
+    "pages/service/recommendations",
+    "pages/visit/booking"
+  ],
+  "window": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "奇德芬芳 · 宝妈端",
+    "navigationBarBackgroundColor": "#FAF9F6",
+    "backgroundColor": "#FAF9F6"
+  },
+  "tabBar": {
+    "color": "#A39D93",
+    "selectedColor": "#876D3E",
+    "backgroundColor": "#FAF9F6",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/home/home",
+        "text": "我的月子"
+      },
+      {
+        "pagePath": "pages/rooms/reserve",
+        "text": "预订房型"
+      },
+      {
+        "pagePath": "pages/mall/mall",
+        "text": "产后康复"
+      },
+      {
+        "pagePath": "pages/me/me",
+        "text": "我的"
+      }
+    ]
+  },
+  "__usePrivacyCheck__": false,
+  "usingComponents": {}
+}

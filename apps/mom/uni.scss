@@ -1,0 +1,27 @@
+/* 奇德芬芳 — 白金主题设计令牌（uni-app 全局，自动注入每个 SFC） */
+/* 瓷白为主、铂金为骨、香槟金作强调。1px≈2rpx @375。 */
+$ivory:        #FAF9F6;   // 屏内主背景 · 瓷白
+$ivory-2:      #F1EFEA;   // 分区底 · 铂金雾
+$paper:        #FFFFFF;   // 卡片纯白
+$ink:          #272521;   // 主文字 · 中性暖墨
+$ink-2:        #6F6A61;
+$ink-3:        #A39D93;
+$platinum:     #D8D4CC;   // 铂金描边
+$platinum-deep:#AAA49A;
+$gold:         #C3A565;   // 香槟金强调
+$gold-deep:    #876D3E;   // 浅底上的可读金
+$gold-soft:    #EEE3CC;
+$night:        #EAE7E0;   // 保留旧变量名，白金主题下不再使用黑色大底
+$hair:         rgba(135,109,62,.20);
+$hair-s:       rgba(135,109,62,.42);
+$foil:         linear-gradient(135deg,#F3E8D2 0%,#D4BB87 48%,#A8874D 100%);
+$platinum-foil:linear-gradient(135deg,#FFFFFF 0%,#ECE9E2 52%,#D2CDC4 100%);
+$shadow-soft:  0 20rpx 60rpx -38rpx rgba(66,58,44,.32);
+
+/* 字体（小程序需在各端按需引入 webfont；H5 用 @font-face） */
+$font-display: "Cormorant Garamond","Noto Serif SC",serif;
+$font-cn-serif:"Noto Serif SC",serif;
+$font-sans:    "Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+
+$radius-md: 32rpx;
+$radius-lg: 44rpx;

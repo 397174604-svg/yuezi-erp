@@ -1,0 +1,35 @@
+{
+  "pages": [
+    { "path": "pages/login/login", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/home/home", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/rooms/reserve", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/diet/diet", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/mall/mall", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/me/me", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/sub/sub", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/qa/qa", "style": { "navigationBarTitleText": "AI 育儿问答", "navigationStyle": "custom" } },
+    { "path": "pages/baby/timeline", "style": { "navigationBarTitleText": "宝宝成长日记", "navigationStyle": "custom", "enablePullDownRefresh": true } },
+    { "path": "pages/care/mine", "style": { "navigationBarTitleText": "我的产后记录", "navigationStyle": "custom", "enablePullDownRefresh": true } },
+    { "path": "pages/login/set-password", "style": { "navigationBarTitleText": "登录密码", "navigationStyle": "custom" } },
+    { "path": "pages/profile/edit", "style": { "navigationBarTitleText": "完善个人资料", "navigationStyle": "custom" } }
+    ,{ "path": "pages/profile/onboarding", "style": { "navigationBarTitleText": "欢迎加入奇德芬芳", "navigationStyle": "custom" } }
+    ,{ "path": "pages/family/invite", "style": { "navigationBarTitleText": "家庭成员与绑定", "navigationStyle": "custom" } }
+    ,{ "path": "pages/entry/qr", "style": { "navigationBarTitleText": "到店服务", "navigationStyle": "custom" } }
+    ,{ "path": "pages/service/requests", "style": { "navigationBarTitleText": "到店服务进度", "navigationStyle": "custom", "enablePullDownRefresh": true } }
+    ,{ "path": "pages/service/recommendations", "style": { "navigationBarTitleText": "专家服务建议", "navigationStyle": "custom", "enablePullDownRefresh": true } }
+    ,{ "path": "pages/visit/booking", "style": { "navigationBarTitleText": "预约到店", "navigationStyle": "custom" } }
+  ],
+  "tabBar": {
+    "color": "#A39D93", "selectedColor": "#876D3E", "backgroundColor": "#FAF9F6", "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/home/home", "text": "我的月子" },
+      { "pagePath": "pages/rooms/reserve", "text": "预订房型" },
+      { "pagePath": "pages/mall/mall", "text": "产后康复" },
+      { "pagePath": "pages/me/me", "text": "我的" }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "black", "navigationBarTitleText": "奇德芬芳 · 宝妈端",
+    "navigationBarBackgroundColor": "#FAF9F6", "backgroundColor": "#FAF9F6"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "pages": [
+    "pages/home/home",
+    "pages/login/login",
+    "pages/clients/clients",
+    "pages/round/round",
+    "pages/round/workbench",
+    "pages/me/me",
+    "pages/client/client",
+    "pages/sub/sub",
+    "pages/rehab/home",
+    "pages/rehab/cashier",
+    "pages/service-requests/service-requests",
+    "pages/recommendations/recommendations",
+    "pages/admin/dashboard",
+    "pages/qr-manager/qr-manager",
+    "pages/admin/room-layout",
+    "pages/housekeeping/turnover"
+  ],
+  "window": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "奇德芬芳 · 员工端",
+    "navigationBarBackgroundColor": "#FBF7F0",
+    "backgroundColor": "#FBF7F0"
+  },
+  "tabBar": {
+    "color": "#A89E8D",
+    "selectedColor": "#8C6A36",
+    "backgroundColor": "#FBF7F0",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/home/home",
+        "text": "工作台"
+      },
+      {
+        "pagePath": "pages/clients/clients",
+        "text": "客户"
+      },
+      {
+        "pagePath": "pages/round/round",
+        "text": "巡房"
+      },
+      {
+        "pagePath": "pages/me/me",
+        "text": "我的"
+      }
+    ]
+  },
+  "__usePrivacyCheck__": false,
+  "usingComponents": {}
+}

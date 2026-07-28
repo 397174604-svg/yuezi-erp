@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "到店服务进度",
+  "navigationStyle": "custom",
+  "enablePullDownRefresh": true,
+  "usingComponents": {}
+}

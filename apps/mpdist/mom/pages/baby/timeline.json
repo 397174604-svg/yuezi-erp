@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "宝宝成长日记",
+  "navigationStyle": "custom",
+  "enablePullDownRefresh": true,
+  "usingComponents": {}
+}

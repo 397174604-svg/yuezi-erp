@@ -1,0 +1,22 @@
+/* 奇德芬芳 — 高奢金白 设计令牌（uni-app 全局，自动注入每个 SFC） */
+/* 源：design-system/tokens.css。1px≈2rpx @375。 */
+$ivory:      #FBF7F0;   // 屏内主背景 · 暖瓷白
+$ivory-2:    #F4ECDD;
+$paper:      #FFFFFF;
+$ink:        #2B2620;   // 主文字 · 暖墨
+$ink-2:      #6E665A;
+$ink-3:      #A89E8D;
+$gold:       #B8945A;   // 主金 · 仿古香槟
+$gold-deep:  #8C6A36;   // 浅底上的金色文字（对比度）
+$gold-soft:  #E7D4AC;
+$night:      #272119;   // 暗夜底（月相 hero / 营业额卡）
+$hair:       rgba(184,148,90,.28);
+$hair-s:     rgba(184,148,90,.55);
+
+/* 字体（小程序需在各端按需引入 webfont；H5 用 @font-face） */
+$font-display: "Cormorant Garamond","Noto Serif SC",serif;
+$font-cn-serif:"Noto Serif SC",serif;
+$font-sans:    "Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+
+$radius-md: 32rpx;
+$radius-lg: 44rpx;

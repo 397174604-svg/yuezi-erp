@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>奇德芬芳 · 演示门户</title>
+<style>
+  /* 高奢金白 · 本地演示门户（生产环境不部署——依赖 dev 演示登录接口） */
+  :root { --ivory:#FBF7F0; --paper:#FFFFFF; --ink:#2A2620; --ink3:#A89E8D; --gold:#C9A063; --gold-deep:#8C6A36; --hair:#EDE4D2; --night:#2A2620; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--ivory); color: var(--ink); font-family: system-ui, "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 20px 18px 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 6px 2px 14px; }
+  .brand .logo { color: var(--gold); font-size: 26px; }
+  .brand .t { font-size: 21px; letter-spacing: 3px; color: var(--gold-deep); font-weight: 600; }
+  .brand .s { margin-left: auto; font-size: 11px; color: var(--ink3); }
+  .card { background: var(--paper); border: 1px solid var(--hair); border-radius: 18px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 10px 30px -18px rgba(74,56,24,.35); }
+  .web { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+  .web .ic { width: 44px; height: 44px; border-radius: 12px; background: linear-gradient(135deg,#E9D4A4,#9C7838); color:#fff; display:flex; align-items:center; justify-content:center; font-size:20px; }
+  .web .tt { font-weight: 600; font-size: 15px; }
+  .web .ss { font-size: 12px; color: var(--ink3); margin-top: 2px; }
+  .web .go { margin-left: auto; color: var(--gold-deep); font-size: 20px; }
+  h2 { font-size: 14px; color: var(--gold-deep); margin: 18px 2px 10px; letter-spacing: 2px; }
+  details { background: var(--paper); border: 1px solid var(--hair); border-radius: 14px; margin-bottom: 10px; overflow: hidden; }
+  summary { list-style: none; cursor: pointer; padding: 12px 16px; display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
+  summary::-webkit-details-marker { display: none; }
+  summary .n { color: var(--ink3); font-weight: 400; font-size: 12px; }
+  summary .arr { margin-left: auto; color: var(--ink3); transition: transform .2s; font-size: 12px; }
+  details[open] summary .arr { transform: rotate(90deg); }
+  .row { display: flex; align-items: center; gap: 8px; padding: 9px 16px; border-top: 1px solid var(--hair); font-size: 13px; }
+  .row .nm { font-weight: 500; min-width: 52px; }
+  .row .meta { color: var(--ink3); font-size: 11px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .btn { border: 1px solid var(--hair); background: var(--ivory); color: var(--gold-deep); border-radius: 20px; padding: 4px 10px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+  .btn:hover { background: linear-gradient(135deg,#E9D4A4,#9C7838); color: #fff; border-color: transparent; }
+  .tip { font-size: 11px; color: var(--ink3); line-height: 1.7; margin-top: 14px; }
+  .err { background: #FBEDED; border: 1px solid #E8C4C4; color: #A04545; border-radius: 12px; padding: 10px 14px; font-size: 12px; margin-bottom: 10px; display: none; }
+  .loading { text-align: center; color: var(--ink3); font-size: 13px; padding: 30px 0; }
+  .search { width: 100%; border: none; outline: none; background: transparent; font-size: 14px; color: var(--ink); }
+  .search::placeholder { color: var(--ink3); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><span class="logo">☾</span><span class="t">奇德芬芳 · 演示门户</span><span class="s">本地演示 · 生产不部署</span></div>
+
+  <div class="card web" onclick="openWeb()">
+    <div class="ic">⌂</div>
+    <div><div class="tt">Web 管理后台（PC）</div><div class="ss">61 模块 · 登录页点演示账号即可（密码 123456）</div></div>
+    <div class="go">›</div>
+  </div>
+
+  <div class="err" id="err"></div>
+  <div class="card"><input id="kw" class="search" type="search" placeholder="搜索账号：姓名 / 手机号 / 角色 / 等级" oninput="doSearch(this.value)"></div>
+  <div class="loading" id="loading">正在加载账号名录…</div>
+  <div id="groups"></div>
+
+  <p class="tip">点击账号右侧按钮，即以该身份打开对应手机端（免登录，身份与数据范围原样生效）。
+    员=员工端 · 产=产康门店端 · 美=科研美容端 · 宝妈组直接进宝妈端。全部账号共享演示密码 123456。</p>
+</div>
+<script>
+const API = 'http://' + (location.hostname || '127.0.0.1') + ':8799/api/v1';
+const PORTS = { staff: 5182, rehab: 5183, beauty: 5184, mom: 5181 };
+// 角色 → 可进入的手机端（员工端=服务型岗位主战场；门店端=收银/导购型岗位主战场；管理层全通）
+const ROLE_ENDS = {
+  '老板': ['staff', 'rehab', 'beauty'], '运营': ['staff', 'rehab', 'beauty'], '店长': ['staff', 'rehab', 'beauty'], '店长助理': ['staff', 'rehab', 'beauty'],
+  '前台': ['rehab', 'beauty'], '收银': ['rehab', 'beauty'], '产康师': ['rehab', 'beauty'], '销售顾问': ['staff', 'rehab'],
+  '护士': ['staff'], '技师': ['staff', 'rehab'],
+};
+const END_LABEL = { staff: '员', rehab: '产', beauty: '美' };
+const GROUP_ORDER = ['老板', '运营', '店长', '店长助理', '前台', '收银', '销售顾问', '产康师', '护士', '技师'];
+let PASS = '123456', bossToken = '';
+
+const h = (extra) => ({ 'content-type': 'application/json', 'x-tenant-id': '1', ...(extra || {}) });
+async function j(url, token) {
+  const r = await fetch(url, { headers: h(token ? { authorization: 'Bearer ' + token } : {}) });
+  const d = await r.json(); if (!r.ok) throw new Error(d.msg || r.status); return d.data;
+}
+async function post(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: h(), body: JSON.stringify(body) });
+  const d = await r.json(); if (!r.ok) throw new Error(d.msg || r.status); return d.data;
+}
+function openWeb() { window.open('http://' + (location.hostname || '127.0.0.1') + ':5180/?api=' + encodeURIComponent(API.replace('/api/v1', '')), '_blank'); }
+
+/** 以员工身份打开手机端：登录换 JWT → 带 ?token= 打开（各端 tokenFromUrl 识别，免二次登录） */
+async function goStaff(phone, end, btn) {
+  try {
+    btn.textContent = '…';
+    const r = await post(API + '/auth/login', { phone, password: PASS });
+    window.open('http://' + (location.hostname || '127.0.0.1') + ':' + PORTS[end] + '/index.html?token=' + encodeURIComponent(r.token) + '#/pages/home/home', '_blank');
+  } catch (e) { showErr('登录失败：' + e.message); }
+  finally { btn.textContent = END_LABEL[end]; }
+}
+/** 以宝妈身份打开宝妈端（dev 专用 login-customer；生产走微信绑定） */
+async function goMom(customerId, btn) {
+  try {
+    btn.textContent = '…';
+    const r = await post(API + '/auth/login-customer', { customerId });
+    window.open('http://' + (location.hostname || '127.0.0.1') + ':' + PORTS.mom + '/index.html?token=' + encodeURIComponent(r.token) + '#/pages/home/home', '_blank');
+  } catch (e) { showErr('宝妈登录失败：' + e.message); }
+  finally { btn.textContent = '进入'; }
+}
+function showErr(msg) { const el = document.getElementById('err'); el.textContent = msg; el.style.display = 'block'; }
+
+function rowStaff(s) {
+  const ends = ROLE_ENDS[s.role] || ['staff'];
+  const btns = ends.map((e) => `<button class="btn" onclick="goStaff('${s.phone}','${e}',this)">${END_LABEL[e]}</button>`).join('');
+  const key = [s.name, s.phone, s.role, s.position, s.department].filter(Boolean).join('|').toLowerCase();
+  return `<div class="row" data-s="${key}"><span class="nm">${s.name}</span><span class="meta">${s.position || s.role}${s.department ? ' · ' + s.department : ''} · ${s.phone || '—'}</span>${btns}</div>`;
+}
+function rowMom(c) {
+  const key = [c.name, c.phone, c.level, c.status, '宝妈'].filter(Boolean).join('|').toLowerCase();
+  return `<div class="row" data-s="${key}"><span class="nm">${c.name}</span><span class="meta">${c.level || '—'} · ${c.status || ''} · ${c.phone || '—'}</span><button class="btn" onclick="goMom(${c.customer_id},this)">进入</button></div>`;
+}
+function group(title, count, inner, open) {
+  return `<details${open ? ' open' : ''}${open ? ' data-def-open="1"' : ''}><summary>${title}<span class="n">（${count}）</span><span class="arr">›</span></summary>${inner}</details>`;
+}
+/** 账号搜索：按姓名/手机号/角色/等级过滤行；命中组自动展开并更新计数，清空恢复默认折叠态。 */
+function doSearch(kw) {
+  kw = String(kw || '').trim().toLowerCase();
+  document.querySelectorAll('#groups .row').forEach((r) => { r.style.display = !kw || (r.dataset.s || '').includes(kw) ? '' : 'none'; });
+  document.querySelectorAll('#groups details').forEach((d) => {
+    const rows = [...d.querySelectorAll('.row')];
+    const vis = rows.filter((r) => r.style.display !== 'none').length;
+    d.style.display = kw && !vis ? 'none' : '';
+    const n = d.querySelector('.n'); if (n) n.textContent = `（${kw ? vis + '/' + rows.length : rows.length}）`;
+    d.open = kw ? vis > 0 : !!d.dataset.defOpen;
+  });
+}
+
+async function boot() {
+  try {
+    const demo = await j(API + '/auth/demo-accounts');
+    PASS = demo.password || '123456';
+    const boss = (demo.staff || []).find((s) => s.role === '老板') || (demo.staff || [])[0];
+    bossToken = (await post(API + '/auth/login', { phone: boss.phone, password: PASS })).token;
+    const [staff, customers] = await Promise.all([
+      j(API + '/staff', bossToken),
+      j(API + '/customers?limit=500', bossToken), // 全部客户（租户1 演示库 ~176）
+    ]);
+    const active = (staff || []).filter((s) => (s.status || '在职') === '在职');
+    const byRole = {};
+    for (const s of active) (byRole[s.role || '其他'] = byRole[s.role || '其他'] || []).push(s);
+    let html = '<h2>员 工 账 号 · 按 角 色</h2>';
+    const seen = new Set();
+    for (const role of GROUP_ORDER) {
+      if (!byRole[role]) continue; seen.add(role);
+      html += group(role, byRole[role].length, byRole[role].map(rowStaff).join(''), role === '老板' || role === '店长');
+    }
+    for (const role of Object.keys(byRole)) if (!seen.has(role)) html += group(role, byRole[role].length, byRole[role].map(rowStaff).join(''), false);
+    html += '<h2>宝 妈 账 号 · 全 部 客 户</h2>';
+    html += group('宝妈', (customers || []).length, (customers || []).map(rowMom).join(''), false);
+    document.getElementById('groups').innerHTML = html;
+    document.getElementById('loading').style.display = 'none';
+  } catch (e) {
+    document.getElementById('loading').style.display = 'none';
+    showErr('门户初始化失败（后端未启动？）：' + e.message);
+  }
+}
+boot();
+</script>
+</body>
+</html>

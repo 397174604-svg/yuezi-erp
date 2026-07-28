@@ -1,0 +1,33 @@
+{
+  "pages": [
+    { "path": "pages/home/home", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/login/login", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/clients/clients", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/round/round", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/round/workbench", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/me/me", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/client/client", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/sub/sub", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/rehab/home", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/rehab/cashier", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/service-requests/service-requests", "style": { "navigationStyle": "custom", "enablePullDownRefresh": true } },
+    { "path": "pages/recommendations/recommendations", "style": { "navigationStyle": "custom", "enablePullDownRefresh": true } },
+    { "path": "pages/admin/dashboard", "style": { "navigationStyle": "custom", "enablePullDownRefresh": true } },
+    { "path": "pages/qr-manager/qr-manager", "style": { "navigationStyle": "custom", "enablePullDownRefresh": true } },
+    { "path": "pages/admin/room-layout", "style": { "navigationStyle": "custom", "enablePullDownRefresh": true } },
+    { "path": "pages/housekeeping/turnover", "style": { "navigationStyle": "custom", "enablePullDownRefresh": true } }
+  ],
+  "tabBar": {
+    "color": "#A89E8D", "selectedColor": "#8C6A36", "backgroundColor": "#FBF7F0", "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/home/home", "text": "工作台" },
+      { "pagePath": "pages/clients/clients", "text": "客户" },
+      { "pagePath": "pages/round/round", "text": "巡房" },
+      { "pagePath": "pages/me/me", "text": "我的" }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "black", "navigationBarTitleText": "奇德芬芳 · 员工端",
+    "navigationBarBackgroundColor": "#FBF7F0", "backgroundColor": "#FBF7F0"
+  }
+}

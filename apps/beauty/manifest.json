@@ -1,0 +1,24 @@
+{
+  "name": "奇德芬芳科研美容门店端",
+  "appid": "",
+  "description": "奇德芬芳 科研美容门店端（科颜中心 · 高奢金白）",
+  "versionName": "0.1.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "app-plus": {
+    "usingComponents": true,
+    "splashscreen": { "alwaysShowBeforeRender": true, "waiting": true, "autoclose": true }
+  },
+  "mp-weixin": {
+    "appid": "",
+    "setting": { "urlCheck": false, "minified": true, "es6": true },
+    "usingComponents": true,
+    "__usePrivacyCheck__": false
+  },
+  "h5": {
+    "title": "奇德芬芳 · 科研美容门店端",
+    "router": { "mode": "hash" },
+    "maxWidth": 480
+  },
+  "vueVersion": "3"
+}
