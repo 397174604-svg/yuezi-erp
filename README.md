@@ -1,243 +1,225 @@
-<p align="center">
-  <img width="320" src="https://wpimg.wallstcn.com/ecc53a42-d79b-42e2-8852-5126b810a4c8.svg">
-</p>
+# 奇德芬芳月子会所 ERP
 
 <p align="center">
-  <a href="https://github.com/vuejs/vue">
-    <img src="https://img.shields.io/badge/vue-2.6.10-brightgreen.svg" alt="vue">
-  </a>
-  <a href="https://github.com/ElemeFE/element">
-    <img src="https://img.shields.io/badge/element--ui-2.7.0-brightgreen.svg" alt="element-ui">
-  </a>
-  <a href="https://travis-ci.org/PanJiaChen/vue-element-admin" rel="nofollow">
-    <img src="https://travis-ci.org/PanJiaChen/vue-element-admin.svg?branch=master" alt="Build Status">
-  </a>
-  <a href="https://github.com/PanJiaChen/vue-element-admin/blob/master/LICENSE">
-    <img src="https://img.shields.io/github/license/mashape/apistatus.svg" alt="license">
-  </a>
-  <a href="https://github.com/PanJiaChen/vue-element-admin/releases">
-    <img src="https://img.shields.io/github/release/PanJiaChen/vue-element-admin.svg" alt="GitHub release">
-  </a>
-  <a href="https://gitter.im/vue-element-admin/discuss">
-    <img src="https://badges.gitter.im/Join%20Chat.svg" alt="gitter">
-  </a>
-  <a href="https://panjiachen.github.io/vue-element-admin-site/donate">
-    <img src="https://img.shields.io/badge/%24-donate-ff69b4.svg" alt="donate">
-  </a>
+  <img src="./src/assets/brand/qdf-logo.svg" width="420" alt="奇德芬芳 Kid Fragrance">
 </p>
-
-English | [简体中文](./README.zh-CN.md) | [日本語](./README.ja.md) | [Spanish](./README.es.md)
-
-<!-- <p align="center">
-  <b>SPONSORED BY</b>
-</p>
-<table align="center" cellspacing="0" cellpadding="0">
-  <tbody>
-    <tr>
-      <td align="center" valign="middle">
-       <a href="" title="" target="_blank" style="padding-right: 20px;">
-        <img height="200px" style="padding-right: 20px;" src="" title="variantForm">
-        </a>
-      </td>
-    </tr>
-  </tbody> 
-</table>-->
-
-## Introduction
-
-[vue-element-admin](https://panjiachen.github.io/vue-element-admin) is a production-ready front-end solution for admin interfaces. It is based on [vue](https://github.com/vuejs/vue) and uses the UI Toolkit [element-ui](https://github.com/ElemeFE/element).
-
-[vue-element-admin](https://panjiachen.github.io/vue-element-admin) is based on the newest development stack of vue and it has a built-in i18n solution, typical templates for enterprise applications, and lots of awesome features. It helps you build large and complex Single-Page Applications. I believe whatever your needs are, this project will help you.
-
-- [Preview](https://panjiachen.github.io/vue-element-admin)
-
-- [Documentation](https://panjiachen.github.io/vue-element-admin-site/)
-
-- [Gitter](https://gitter.im/vue-element-admin/discuss)
-
-- [Donate](https://panjiachen.github.io/vue-element-admin-site/donate/)
-
-- [Wiki](https://github.com/PanJiaChen/vue-element-admin/wiki)
-
-- [Gitee](https://panjiachen.gitee.io/vue-element-admin/) 国内用户可访问该地址在线预览
-
-- Base template recommends using: [vue-admin-template](https://github.com/PanJiaChen/vue-admin-template)
-- Desktop: [electron-vue-admin](https://github.com/PanJiaChen/electron-vue-admin)
-- Typescript: [vue-typescript-admin-template](https://github.com/Armour/vue-typescript-admin-template) (Credits: [@Armour](https://github.com/Armour))
-- [awesome-project](https://github.com/PanJiaChen/vue-element-admin/issues/2312)
-
-**After the `v4.1.0+` version, the default master branch will not support i18n. Please use [i18n Branch](https://github.com/PanJiaChen/vue-element-admin/tree/i18n), it will keep up with the master update**
-
-**The current version is `v4.0+` build on `vue-cli`. If you find a problem, please put [issue](https://github.com/PanJiaChen/vue-element-admin/issues/new). If you want to use the old version , you can switch branch to [tag/3.11.0](https://github.com/PanJiaChen/vue-element-admin/tree/tag/3.11.0), it does not rely on `vue-cli`**
-
-**This project does not support low version browsers (e.g. IE). Please add polyfill by yourself.**
-
-## Preparation
-
-You need to install [node](https://nodejs.org/) and [git](https://git-scm.com/) locally. The project is based on [ES2015+](https://es6.ruanyifeng.com/), [vue](https://cn.vuejs.org/index.html), [vuex](https://vuex.vuejs.org/zh-cn/), [vue-router](https://router.vuejs.org/zh-cn/), [vue-cli](https://github.com/vuejs/vue-cli) , [axios](https://github.com/axios/axios) and [element-ui](https://github.com/ElemeFE/element), all request data is simulated using [Mock.js](https://github.com/nuysoft/Mock).
-Understanding and learning this knowledge in advance will greatly help the use of this project.
-
-[![Edit on CodeSandbox](https://codesandbox.io/static/img/play-codesandbox.svg)](https://codesandbox.io/s/github/PanJiaChen/vue-element-admin/tree/CodeSandbox)
 
 <p align="center">
-  <img width="900" src="https://wpimg.wallstcn.com/a5894c1b-f6af-456e-82df-1151da0839bf.png">
+  面向月子会所的客户、销售、财务、客房、护理、产康、膳食与仓存一体化业务管理系统
 </p>
 
-## Sponsors
-
-Become a sponsor and get your logo on our README on GitHub with a link to your site. [[Become a sponsor]](https://www.patreon.com/panjiachen)
-
-### Akveo
-<a href="https://store.akveo.com/products/vue-java-admin-dashboard-spring?utm_campaign=akveo_store-Vue-Vue_demo%2Fgithub&utm_source=vue_admin&utm_medium=referral&utm_content=github_banner"><img width="500px" src="https://raw.githubusercontent.com/PanJiaChen/vue-element-admin-site/master/docs/.vuepress/public/images/vue-java-banner.png" /></a><p>Get Java backend for Vue admin with 20% discount for 39$ use coupon code SWB0RAZPZR1M
+<p align="center">
+  <img src="https://img.shields.io/badge/Vue-2.6-4FC08D" alt="Vue 2.6">
+  <img src="https://img.shields.io/badge/Element_UI-2.x-409EFF" alt="Element UI">
+  <img src="https://img.shields.io/badge/Python-3.x-3776AB" alt="Python 3">
+  <img src="https://img.shields.io/badge/MySQL-5.7-4479A1" alt="MySQL 5.7">
 </p>
 
-### Flatlogic
+## 项目简介
 
-<a href="https://flatlogic.com/admin-dashboards?from=vue-element-admin"><img width="150px" src="https://wpimg.wallstcn.com/9c0b719b-5551-4c1e-b776-63994632d94a.png" /></a><p>Admin Dashboard Templates made with Vue, React and Angular.</p>
+奇德芬芳月子会所 ERP 是一套按真实月子会所业务流程建设的管理系统。项目以前端字段级复刻为基础，正在逐步将旧“妈妈宝盒”ERP 的菜单、查询条件、工具栏、表单字段、角色权限和业务规则迁移到 MySQL 后端。
 
-## Features
+当前已经打通首条真实业务主链路：
 
-```
-- Login / Logout
-
-- Permission Authentication
-  - Page permission
-  - Directive permission
-  - Permission configuration page
-  - Two-step login
-
-- Multi-environment build
-  - Develop (dev)
-  - sit
-  - Stage Test (stage)
-  - Production (prod)
-
-- Global Features
-  - I18n
-  - Multiple dynamic themes
-  - Dynamic sidebar (supports multi-level routing)
-  - Dynamic breadcrumb
-  - Tags-view (Tab page Support right-click operation)
-  - Svg Sprite
-  - Mock data
-  - Screenfull
-  - Responsive Sidebar
-
-- Editor
-  - Rich Text Editor
-  - Markdown Editor
-  - JSON Editor
-
-- Excel
-  - Export Excel
-  - Upload Excel
-  - Visualization Excel
-  - Export zip
-
-- Table
-  - Dynamic Table
-  - Drag And Drop Table
-  - Inline Edit Table
-
-- Error Page
-  - 401
-  - 404
-
-- Components
-  - Avatar Upload
-  - Back To Top
-  - Drag Dialog
-  - Drag Select
-  - Drag Kanban
-  - Drag List
-  - SplitPane
-  - Dropzone
-  - Sticky
-  - CountTo
-
-- Advanced Example
-- Error Log
-- Dashboard
-- Guide Page
-- ECharts
-- Clipboard
-- Markdown to html
+```text
+客户建档 → 合同签订/审核 → 收款登记/审核 → 订房 → 入住
 ```
 
-## Getting started
+该链路通过 Python API 与 MySQL 5.7 事务落库，不再依赖 JSON 本地数据；登录、菜单、按钮、接口和门店数据范围使用同一套角色权限进行校验。
 
-```bash
-# clone the project
-git clone https://github.com/PanJiaChen/vue-element-admin.git
+本项目的管理端界面基于 [vue-element-admin](https://github.com/PanJiaChen/vue-element-admin) 二次开发，并针对奇德芬芳品牌完成金白主题、导航、Logo、业务菜单和工作台改造。
 
-# enter the project directory
-cd vue-element-admin
+## 当前实现
 
-# install dependency
-npm install
+### 核心业务
 
-# develop
+- 客户建档、手机号重复校验、客户状态流转
+- 六类合同、套餐、价格、折扣率及合同审核
+- 收款登记、收款审核、未入账金额和欠款计算
+- 房间主数据、日期冲突校验、订房和入住
+- 业务操作审计及前后状态记录
+- 套餐版本、房型、入住天数、门店、生效日期与权益模型
+
+### 组织与权限
+
+- 租户、门店、部门、岗位、员工和账号
+- 用户—角色、角色—权限、用户—门店关系
+- 原系统角色、菜单、按钮和数据权限资源迁移
+- 管理员、销售经理、产康师、客房管家主链路权限验证
+- 前端菜单、操作按钮和后端 API 双重鉴权
+
+### ERP 模块
+
+- 客户管理
+- 销售管理
+- 财务管理
+- 客房管理
+- 护理管理
+- 产康管理
+- 月嫂管理
+- 膳食管理
+- 仓存管理
+- 商城管理
+- 风控服务
+- 查询报表
+- 基础资料
+- 系统设置
+
+除核心主链路外，部分模块当前仍处于字段级复刻或接口逐步接入阶段，不能视为全部生产功能已经完成。
+
+### 多端应用
+
+`apps/` 提供新的多端工作区：
+
+- `apps/admin`：Vue 3 + Element Plus 管理端
+- `apps/staff`：员工端 uni-app
+- `apps/mom`：宝妈端 uni-app
+- `apps/beauty`：美容/产康独立端代码
+- `apps/demo`：多端聚合演示
+- `apps/h5dist`：H5 构建产物
+- `apps/mpdist`：微信小程序构建产物
+
+## 技术架构
+
+| 层级 | 技术 |
+| --- | --- |
+| 现有 ERP 前端 | Vue 2、Vue Router、Vuex、Element UI、Axios |
+| 新管理端 | Vue 3、TypeScript、Vite、Pinia、Element Plus |
+| 移动端 | uni-app、Vue 3、H5、微信小程序 |
+| 后端 | Python HTTP API |
+| 数据库 | MySQL 5.7、事务、外键、迁移脚本 |
+| 权限 | 用户、角色、权限、门店范围、按钮权限、服务端鉴权 |
+| 测试 | Python 流程测试、Node.js 逻辑测试、浏览器回归 |
+
+## 项目目录
+
+```text
+.
+├─ apps/                         # 管理端、员工端、宝妈端与构建产物
+├─ database/mysql/migrations/    # MySQL 5.7 数据库迁移
+├─ docs/                         # 运行说明、权限设计、业务和交接文档
+├─ mock/                         # 未接入真实后端页面的兼容数据
+├─ scripts/                      # 初始化、迁移、权限导入及测试脚本
+├─ server/                       # Python ERP API
+└─ src/                          # Vue 2 ERP 前端
+```
+
+## 环境要求
+
+- Node.js
+- npm 或 pnpm
+- Python 3
+- MySQL 5.7
+- Git
+
+请勿把数据库密码、管理员密码或令牌写进项目文件。所有凭据均通过环境变量传入。
+
+## 快速启动
+
+### 1. 获取代码并安装依赖
+
+```powershell
+git clone https://github.com/397174604-svg/yuezi-erp.git
+Set-Location yuezi-erp
+pnpm install
+```
+
+### 2. 配置本地环境
+
+```powershell
+$env:ERP_DB_PASSWORD='<本机 MySQL 密码>'
+$env:ERP_BOOTSTRAP_ADMIN_PASSWORD='<管理员登录密码>'
+$env:ERP_TOKEN_SECRET='<至少 32 位随机字符串>'
+```
+
+首次部署到新数据库时执行：
+
+```powershell
+npm run migrate:mvp
+npm run bootstrap:mvp
+npm run bootstrap:mvp:roles
+```
+
+### 3. 启动前后端
+
+```powershell
+npm run dev:mvp
+```
+
+- 前端：`http://localhost:9527/`
+- API：`http://127.0.0.1:3000/`
+
+也可以分别启动：
+
+```powershell
+npm run api:mvp
 npm run dev
 ```
 
-This will automatically open http://localhost:9527
+## 多端应用
 
-## Build
+构建员工端和宝妈端 H5：
 
-```bash
-# build for test environment
-npm run build:stage
-
-# build for production environment
-npm run build:prod
+```powershell
+Set-Location apps
+pnpm install
+pnpm run build:all
 ```
 
-## Advanced
+构建微信小程序：
 
-```bash
-# preview the release environment effect
-npm run preview
-
-# preview the release environment effect + static resource analysis
-npm run preview -- --report
-
-# code format check
-npm run lint
-
-# code format check and auto fix
-npm run lint -- --fix
+```powershell
+pnpm run build:mp:all
 ```
 
-Refer to [Documentation](https://panjiachen.github.io/vue-element-admin-site/guide/essentials/deploy.html) for more information
+构建新的 Vue 3 管理端：
 
-## Changelog
+```powershell
+Set-Location apps\admin
+pnpm install
+pnpm run build
+```
 
-Detailed changes for each release are documented in the [release notes](https://github.com/PanJiaChen/vue-element-admin/releases).
+## 验证
 
-## Online Demo
+检查数据库与迁移状态：
 
-[Preview](https://panjiachen.github.io/vue-element-admin)
+```powershell
+npm run verify:mvp
+```
 
-## Donate
+执行角色权限回归：
 
-If you find this project useful, you can buy author a glass of juice :tropical_drink:
+```powershell
+npm run test:mvp:rbac
+```
 
-![donate](https://wpimg.wallstcn.com/bd273f0d-83a0-4ef2-92e1-9ac8ed3746b9.png)
+执行自动清理的完整主链路验收：
 
-[Paypal Me](https://www.paypal.me/panfree23)
+```powershell
+python scripts/smoke-mvp.py
+```
 
-[Buy me a coffee](https://www.buymeacoffee.com/Pan)
+执行多端核心逻辑测试：
 
-## Browsers support
+```powershell
+node --test apps\staff\test\logic.test.js apps\mom\test\logic.test.js apps\beauty\test\logic.test.js apps\demo\test\tabbar.test.js
+```
 
-Modern browsers and Internet Explorer 10+.
+## 文档
 
-| [<img src="https://raw.githubusercontent.com/alrra/browser-logos/master/src/edge/edge_48x48.png" alt="IE / Edge" width="24px" height="24px" />](https://godban.github.io/browsers-support-badges/)</br>IE / Edge | [<img src="https://raw.githubusercontent.com/alrra/browser-logos/master/src/firefox/firefox_48x48.png" alt="Firefox" width="24px" height="24px" />](https://godban.github.io/browsers-support-badges/)</br>Firefox | [<img src="https://raw.githubusercontent.com/alrra/browser-logos/master/src/chrome/chrome_48x48.png" alt="Chrome" width="24px" height="24px" />](https://godban.github.io/browsers-support-badges/)</br>Chrome | [<img src="https://raw.githubusercontent.com/alrra/browser-logos/master/src/safari/safari_48x48.png" alt="Safari" width="24px" height="24px" />](https://godban.github.io/browsers-support-badges/)</br>Safari |
-| --------- | --------- | --------- | --------- |
-| IE10, IE11, Edge | last 2 versions | last 2 versions | last 2 versions |
+- [MVP 运行与后续建设说明](./docs/MVP运行与后续建设说明.md)
+- [项目交接文档](./docs/交接文档/奇德芬芳ERP-项目交接文档-2026-07-27.md)
+- [真实业务与 MySQL 设计](./docs/database/奇德芬芳ERP-真实业务ER与MySQL设计-2026-07-27.md)
+- [原 ERP 权限迁移与优化说明](./docs/原ERP权限迁移与优化说明-2026-07-26.md)
+- [多端应用迁移说明](./apps/CONVERSION.md)
 
-## License
+## 安全说明
 
-[MIT](https://github.com/PanJiaChen/vue-element-admin/blob/master/LICENSE)
+- 仓库不保存真实数据库密码、账号密码或访问令牌。
+- 旧系统业务截图、抓取缓存和含隐私的本地资料不会提交到公开仓库。
+- 生产环境需要单独配置 HTTPS、密钥管理、数据库备份、日志审计和监控告警。
 
-Copyright (c) 2017-present PanJiaChen
+## 开源基础
+
+本项目管理端基于 [PanJiaChen/vue-element-admin](https://github.com/PanJiaChen/vue-element-admin) 进行二次开发。原项目版权及许可证归原作者所有，本仓库保留相应许可证文件。
