@@ -68,6 +68,13 @@
       width: 100% !important;
     }
 
+    .el-menu-item.is-active,
+    .el-submenu.is-opened > .el-submenu__title {
+      color: $menuActiveText !important;
+      background: linear-gradient(90deg, rgba(184, 148, 90, .34), rgba(184, 148, 90, .06)) !important;
+      border-left: 3px solid #B8945A;
+    }
+
     // menu hover
     .submenu-title-noDropdown,
     .el-submenu__title {
@@ -88,6 +95,14 @@
       &:hover {
         background-color: $subMenuHover !important;
       }
+    }
+
+    // 子页面的普通背景规则带有 !important，激活态必须在其后覆盖。
+    & .el-submenu .el-menu-item.is-active,
+    & .nest-menu .el-menu-item.is-active {
+      color: $menuActiveText !important;
+      background: linear-gradient(90deg, rgba(184, 148, 90, .34), rgba(184, 148, 90, .06)) !important;
+      border-left: 3px solid #B8945A;
     }
   }
 

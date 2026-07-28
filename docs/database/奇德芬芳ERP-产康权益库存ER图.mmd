@@ -1,0 +1,150 @@
+erDiagram
+    CONTRACTS {
+        bigint contract_id PK
+        bigint customer_id FK
+        string contract_no UK
+        string status
+    }
+    SERVICE_PROJECTS {
+        bigint service_project_id PK
+        bigint tenant_id FK
+        string project_code UK
+        string project_name
+        string project_category
+        string status
+    }
+    CUSTOMER_ENTITLEMENTS {
+        bigint entitlement_id PK
+        bigint customer_id FK
+        bigint contract_id FK
+        bigint service_project_id FK
+        string source_type
+        decimal granted_quantity
+        decimal remaining_quantity
+        date valid_to
+    }
+    ENTITLEMENT_LEDGER {
+        bigint ledger_id PK
+        bigint entitlement_id FK
+        bigint execution_id FK
+        string transaction_type
+        decimal quantity
+        decimal balance_after
+        datetime occurred_at
+    }
+    SERVICE_PROTOCOL_VERSIONS {
+        bigint protocol_version_id PK
+        bigint service_project_id FK
+        string version_no
+        date effective_from
+        date effective_to
+        string approval_status
+    }
+    SERVICE_PROTOCOL_STEPS {
+        bigint protocol_step_id PK
+        bigint protocol_version_id FK
+        int step_no
+        string step_name
+        int planned_minutes
+        bool measurement_required
+    }
+    SERVICE_APPOINTMENTS {
+        bigint appointment_id PK
+        bigint entitlement_id FK
+        bigint store_id FK
+        bigint assigned_staff_id FK
+        datetime scheduled_start
+        datetime scheduled_end
+        string status
+    }
+    SERVICE_EXECUTIONS {
+        bigint execution_id PK
+        bigint appointment_id FK
+        bigint protocol_version_id FK
+        bigint subject_id FK
+        datetime started_at
+        datetime completed_at
+        string status
+    }
+    SERVICE_EXECUTION_STEPS {
+        bigint execution_step_id PK
+        bigint execution_id FK
+        bigint protocol_step_id FK
+        datetime completed_at
+        string result_code
+        text observation
+    }
+    MATERIALS {
+        bigint material_id PK
+        bigint tenant_id FK
+        string material_code UK
+        string material_name
+        bigint base_uom_id FK
+        string status
+    }
+    PROJECT_MATERIAL_BOMS {
+        bigint bom_id PK
+        bigint protocol_version_id FK
+        bigint protocol_step_id FK
+        bigint material_id FK
+        decimal standard_quantity
+        bigint uom_id FK
+    }
+    WAREHOUSES {
+        bigint warehouse_id PK
+        bigint store_id FK
+        string warehouse_code UK
+        string warehouse_name
+        string status
+    }
+    STOCK_LOTS {
+        bigint stock_lot_id PK
+        bigint warehouse_id FK
+        bigint material_id FK
+        string lot_no
+        date expiry_date
+        decimal available_quantity
+    }
+    STOCK_MOVEMENTS {
+        bigint movement_id PK
+        bigint warehouse_id FK
+        bigint material_id FK
+        bigint stock_lot_id FK
+        string movement_type
+        decimal quantity
+        decimal unit_cost
+        datetime occurred_at
+    }
+    SERVICE_MATERIAL_CONSUMPTIONS {
+        bigint consumption_id PK
+        bigint execution_id FK
+        bigint material_id FK
+        bigint stock_lot_id FK
+        bigint stock_movement_id FK
+        decimal planned_quantity
+        decimal actual_quantity
+    }
+
+    CONTRACTS ||--o{ CUSTOMER_ENTITLEMENTS : "grants"
+    SERVICE_PROJECTS ||--o{ CUSTOMER_ENTITLEMENTS : "defines"
+    CUSTOMER_ENTITLEMENTS ||--o{ ENTITLEMENT_LEDGER : "records"
+    SERVICE_PROJECTS ||--o{ SERVICE_PROTOCOL_VERSIONS : "is executed by"
+    SERVICE_PROTOCOL_VERSIONS ||--o{ SERVICE_PROTOCOL_STEPS : "contains"
+    CUSTOMER_ENTITLEMENTS ||--o{ SERVICE_APPOINTMENTS : "books"
+    SERVICE_APPOINTMENTS ||--o| SERVICE_EXECUTIONS : "becomes"
+    SERVICE_PROTOCOL_VERSIONS ||--o{ SERVICE_EXECUTIONS : "governs"
+    SERVICE_EXECUTIONS ||--o{ SERVICE_EXECUTION_STEPS : "contains"
+    SERVICE_PROTOCOL_STEPS ||--o{ SERVICE_EXECUTION_STEPS : "instantiates"
+    SERVICE_PROTOCOL_VERSIONS ||--o{ PROJECT_MATERIAL_BOMS : "expects"
+    SERVICE_PROTOCOL_STEPS ||--o{ PROJECT_MATERIAL_BOMS : "uses"
+    MATERIALS ||--o{ PROJECT_MATERIAL_BOMS : "is required by"
+    WAREHOUSES ||--o{ STOCK_LOTS : "holds"
+    MATERIALS ||--o{ STOCK_LOTS : "is stocked as"
+    WAREHOUSES ||--o{ STOCK_MOVEMENTS : "records"
+    MATERIALS ||--o{ STOCK_MOVEMENTS : "moves"
+    STOCK_LOTS ||--o{ STOCK_MOVEMENTS : "traces"
+    SERVICE_EXECUTIONS ||--o{ SERVICE_MATERIAL_CONSUMPTIONS : "consumes"
+    MATERIALS ||--o{ SERVICE_MATERIAL_CONSUMPTIONS : "is consumed"
+    STOCK_LOTS ||--o{ SERVICE_MATERIAL_CONSUMPTIONS : "supplies"
+    STOCK_MOVEMENTS ||--o| SERVICE_MATERIAL_CONSUMPTIONS : "posts"
+    SERVICE_EXECUTIONS ||--o| ENTITLEMENT_LEDGER : "deducts"

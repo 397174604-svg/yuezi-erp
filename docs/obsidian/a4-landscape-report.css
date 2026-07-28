@@ -1,0 +1,109 @@
+@page {
+  size: A4 landscape;
+  margin: 10mm;
+}
+
+.a4-landscape-report {
+  --report-gold: #c6a66b;
+  --report-gold-soft: #efe0bd;
+  --report-ink: #2b261e;
+  --report-muted: #756b5d;
+  --report-line: #e6dcc9;
+  max-width: 277mm;
+  margin: 0 auto;
+  color: var(--report-ink);
+}
+
+.a4-landscape-report h1 {
+  margin: 0 0 10px;
+  padding: 16px 20px;
+  border-radius: 12px;
+  color: #f8edcf;
+  background: linear-gradient(110deg, #1f1b16, #4b4030);
+}
+
+.a4-landscape-report h2 {
+  margin: 14px 0 8px;
+  color: #9c793e;
+}
+
+.a4-landscape-report h3 {
+  margin: 10px 0 5px;
+}
+
+.a4-landscape-report table {
+  width: 100%;
+  margin: 8px 0 12px;
+  font-size: 0.9em;
+}
+
+.a4-landscape-report th {
+  background: #f8f1e3;
+  color: #755726;
+}
+
+.a4-landscape-report img {
+  max-height: 240px;
+  width: auto;
+  border: 1px solid var(--report-line);
+  border-radius: 10px;
+}
+
+.a4-landscape-report .report-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+}
+
+.a4-landscape-report .report-card {
+  padding: 8px 12px;
+  border: 1px solid var(--report-line);
+  border-radius: 10px;
+  background: linear-gradient(145deg, #fff, #fcf8ef);
+}
+
+.a4-landscape-report .report-card h2 {
+  margin-top: 0;
+}
+
+.a4-landscape-report .report-wide {
+  grid-column: 1 / -1;
+}
+
+@media print {
+  body {
+    background: #fff !important;
+  }
+
+  .a4-landscape-report {
+    width: 277mm;
+    max-width: 277mm;
+    font-size: 9.2pt;
+    line-height: 1.32;
+  }
+
+  .a4-landscape-report h1 {
+    font-size: 19pt;
+  }
+
+  .a4-landscape-report h2 {
+    font-size: 13pt;
+  }
+
+  .a4-landscape-report h3 {
+    font-size: 10.5pt;
+  }
+
+  .a4-landscape-report p,
+  .a4-landscape-report ul,
+  .a4-landscape-report ol {
+    margin-top: 4px;
+    margin-bottom: 4px;
+  }
+
+  .a4-landscape-report .report-card,
+  .a4-landscape-report table,
+  .a4-landscape-report blockquote {
+    break-inside: avoid;
+  }
+}

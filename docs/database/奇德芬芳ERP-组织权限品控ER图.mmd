@@ -1,0 +1,148 @@
+erDiagram
+    STORES {
+        bigint store_id PK
+        bigint tenant_id FK
+        string store_code UK
+        string store_name
+        string status
+    }
+    DEPARTMENTS {
+        bigint department_id PK
+        bigint store_id FK
+        bigint parent_department_id FK
+        string department_code
+        string department_name
+        string status
+    }
+    POSITIONS {
+        bigint position_id PK
+        bigint department_id FK
+        string position_code
+        string position_name
+        bool manager_flag
+        string status
+    }
+    STAFF {
+        bigint staff_id PK
+        bigint store_id FK
+        bigint department_id FK
+        bigint position_id FK
+        string employee_no UK
+        string staff_name
+        string employment_status
+    }
+    USER_ACCOUNTS {
+        bigint user_id PK
+        bigint tenant_id FK
+        bigint staff_id FK
+        string username UK
+        string password_hash
+        string account_status
+    }
+    ROLES {
+        bigint role_id PK
+        bigint tenant_id FK
+        string role_code UK
+        string role_name
+        string role_type
+    }
+    PERMISSIONS {
+        bigint permission_id PK
+        string permission_code UK
+        string module_code
+        string action_code
+        string resource_type
+    }
+    USER_ROLES {
+        bigint user_role_id PK
+        bigint user_id FK
+        bigint role_id FK
+        datetime valid_from
+        datetime valid_to
+    }
+    ROLE_PERMISSIONS {
+        bigint role_permission_id PK
+        bigint role_id FK
+        bigint permission_id FK
+        string grant_type
+    }
+    USER_STORES {
+        bigint user_store_id PK
+        bigint user_id FK
+        bigint store_id FK
+        bool default_flag
+    }
+    ROLE_DATA_SCOPES {
+        bigint data_scope_id PK
+        bigint role_id FK
+        string module_code
+        string scope_type
+        string scope_value
+    }
+    FIELD_PERMISSIONS {
+        bigint field_permission_id PK
+        bigint role_id FK
+        string module_code
+        string field_code
+        string visibility_mode
+        bool editable_flag
+    }
+    QC_STANDARD_VERSIONS {
+        bigint qc_standard_version_id PK
+        bigint tenant_id FK
+        string standard_name
+        string version_no
+        date effective_from
+        string status
+    }
+    QC_STANDARD_ITEMS {
+        bigint qc_standard_item_id PK
+        bigint qc_standard_version_id FK
+        bigint department_id FK
+        string category_name
+        string item_text
+        decimal weight
+        decimal deduction_score
+    }
+    QC_INSPECTIONS {
+        bigint inspection_id PK
+        bigint qc_standard_version_id FK
+        bigint store_id FK
+        bigint department_id FK
+        bigint inspector_staff_id FK
+        datetime inspected_at
+        decimal total_score
+        string status
+    }
+    QC_ISSUES {
+        bigint qc_issue_id PK
+        bigint inspection_id FK
+        bigint qc_standard_item_id FK
+        bigint responsible_staff_id FK
+        datetime rectification_due_at
+        string rectification_status
+        datetime rechecked_at
+    }
+
+    STORES ||--o{ DEPARTMENTS : "contains"
+    DEPARTMENTS ||--o{ DEPARTMENTS : "nests"
+    DEPARTMENTS ||--o{ POSITIONS : "defines"
+    STORES ||--o{ STAFF : "employs"
+    DEPARTMENTS ||--o{ STAFF : "organizes"
+    POSITIONS ||--o{ STAFF : "assigns"
+    STAFF ||--o| USER_ACCOUNTS : "may authenticate as"
+    USER_ACCOUNTS ||--o{ USER_ROLES : "has"
+    ROLES ||--o{ USER_ROLES : "is assigned through"
+    ROLES ||--o{ ROLE_PERMISSIONS : "grants"
+    PERMISSIONS ||--o{ ROLE_PERMISSIONS : "is granted by"
+    USER_ACCOUNTS ||--o{ USER_STORES : "can enter"
+    STORES ||--o{ USER_STORES : "is accessible through"
+    ROLES ||--o{ ROLE_DATA_SCOPES : "limits rows"
+    ROLES ||--o{ FIELD_PERMISSIONS : "limits fields"
+    QC_STANDARD_VERSIONS ||--o{ QC_STANDARD_ITEMS : "contains"
+    DEPARTMENTS ||--o{ QC_STANDARD_ITEMS : "is evaluated by"
+    QC_STANDARD_VERSIONS ||--o{ QC_INSPECTIONS : "governs"
+    STORES ||--o{ QC_INSPECTIONS : "is inspected"
+    DEPARTMENTS ||--o{ QC_INSPECTIONS : "is inspected"
+    QC_INSPECTIONS ||--o{ QC_ISSUES : "raises"
+    QC_STANDARD_ITEMS ||--o{ QC_ISSUES : "fails"

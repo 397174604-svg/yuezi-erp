@@ -1,0 +1,176 @@
+erDiagram
+    TENANTS {
+        bigint tenant_id PK
+        string tenant_code UK
+        string tenant_name
+        string status
+    }
+    STORES {
+        bigint store_id PK
+        bigint tenant_id FK
+        string store_code UK
+        string store_name
+        string status
+    }
+    CUSTOMERS {
+        bigint customer_id PK
+        bigint tenant_id FK
+        bigint store_id FK
+        string customer_no UK
+        string customer_name
+        string mobile
+        string lifecycle_status
+    }
+    CARE_SUBJECTS {
+        bigint subject_id PK
+        bigint tenant_id FK
+        bigint customer_id FK
+        string subject_type
+        string display_name
+        string status
+    }
+    MOTHER_PROFILES {
+        bigint mother_profile_id PK
+        bigint subject_id FK
+        date expected_delivery_date
+        date delivery_date
+        string delivery_mode
+        string risk_level
+    }
+    BABY_PROFILES {
+        bigint baby_profile_id PK
+        bigint subject_id FK
+        bigint mother_subject_id FK
+        date birth_date
+        string sex
+        decimal birth_weight
+    }
+    PACKAGE_VERSIONS {
+        bigint package_version_id PK
+        bigint tenant_id FK
+        string package_code
+        string package_name
+        string version_no
+        date effective_from
+        date effective_to
+    }
+    PACKAGE_PRICE_RULES {
+        bigint price_rule_id PK
+        bigint package_version_id FK
+        bigint store_id FK
+        bigint room_type_id FK
+        int stay_days
+        decimal reference_amount
+        string currency_code
+    }
+    PACKAGE_ENTITLEMENT_RULES {
+        bigint entitlement_rule_id PK
+        bigint package_version_id FK
+        bigint service_project_id FK
+        string frequency_type
+        decimal quantity
+        bigint choice_group_id FK
+        decimal per_item_limit
+    }
+    CONTRACTS {
+        bigint contract_id PK
+        bigint tenant_id FK
+        bigint store_id FK
+        bigint customer_id FK
+        string contract_no UK
+        decimal deal_amount
+        string status
+    }
+    CONTRACT_PACKAGE_SNAPSHOTS {
+        bigint snapshot_id PK
+        bigint contract_id FK
+        bigint source_package_version_id FK
+        string package_name
+        int stay_days
+        decimal reference_amount
+        text snapshot_json
+    }
+    FINANCE_RECEIPTS {
+        bigint receipt_id PK
+        bigint tenant_id FK
+        bigint store_id FK
+        bigint customer_id FK
+        string receipt_no UK
+        decimal amount
+        string status
+    }
+    RECEIPT_ALLOCATIONS {
+        bigint allocation_id PK
+        bigint receipt_id FK
+        bigint contract_id FK
+        decimal allocated_amount
+        string allocation_type
+    }
+    ROOM_TYPES {
+        bigint room_type_id PK
+        bigint tenant_id FK
+        string room_type_code
+        string room_type_name
+        int bedroom_count
+        int living_room_count
+    }
+    ROOMS {
+        bigint room_id PK
+        bigint store_id FK
+        bigint room_type_id FK
+        string room_no
+        int floor_no
+        string operational_status
+    }
+    ROOM_BOOKINGS {
+        bigint booking_id PK
+        bigint tenant_id FK
+        bigint store_id FK
+        bigint contract_id FK
+        bigint room_id FK
+        datetime planned_check_in
+        datetime planned_check_out
+        string status
+    }
+    STAYS {
+        bigint stay_id PK
+        bigint booking_id FK
+        bigint room_id FK
+        datetime actual_check_in
+        datetime actual_check_out
+        string room_status
+        string settlement_status
+    }
+    STAY_PARTICIPANTS {
+        bigint stay_participant_id PK
+        bigint stay_id FK
+        bigint subject_id FK
+        string participant_role
+        bool primary_flag
+    }
+
+    TENANTS ||--o{ STORES : "owns"
+    TENANTS ||--o{ CUSTOMERS : "isolates"
+    STORES ||--o{ CUSTOMERS : "serves"
+    CUSTOMERS ||--o{ CARE_SUBJECTS : "represents"
+    CARE_SUBJECTS ||--o| MOTHER_PROFILES : "has mother profile"
+    CARE_SUBJECTS ||--o| BABY_PROFILES : "has baby profile"
+    CARE_SUBJECTS ||--o{ BABY_PROFILES : "is mother of"
+    TENANTS ||--o{ PACKAGE_VERSIONS : "publishes"
+    PACKAGE_VERSIONS ||--o{ PACKAGE_PRICE_RULES : "prices"
+    STORES ||--o{ PACKAGE_PRICE_RULES : "applies at"
+    ROOM_TYPES ||--o{ PACKAGE_PRICE_RULES : "prices for"
+    PACKAGE_VERSIONS ||--o{ PACKAGE_ENTITLEMENT_RULES : "grants"
+    CUSTOMERS ||--o{ CONTRACTS : "signs"
+    CONTRACTS ||--|| CONTRACT_PACKAGE_SNAPSHOTS : "freezes"
+    PACKAGE_VERSIONS ||--o{ CONTRACT_PACKAGE_SNAPSHOTS : "is source of"
+    CUSTOMERS ||--o{ FINANCE_RECEIPTS : "pays"
+    FINANCE_RECEIPTS ||--o{ RECEIPT_ALLOCATIONS : "allocates"
+    CONTRACTS ||--o{ RECEIPT_ALLOCATIONS : "settles"
+    STORES ||--o{ ROOMS : "contains"
+    ROOM_TYPES ||--o{ ROOMS : "classifies"
+    CONTRACTS ||--o{ ROOM_BOOKINGS : "reserves"
+    ROOMS ||--o{ ROOM_BOOKINGS : "is booked by"
+    ROOM_BOOKINGS ||--o| STAYS : "becomes"
+    STAYS ||--o{ STAY_PARTICIPANTS : "hosts"
+    CARE_SUBJECTS ||--o{ STAY_PARTICIPANTS : "participates"

@@ -4,10 +4,26 @@
   "description": "A magical vue admin. An out-of-box UI solution for enterprise applications. Newest development stack of vue. Lots of awesome features",
   "author": "Pan <panfree23@gmail.com>",
   "scripts": {
-    "dev": "vue-cli-service serve",
+    "dev": "node --openssl-legacy-provider ./node_modules/@vue/cli-service/bin/vue-cli-service.js serve",
+    "dev:mvp": "node scripts/start-mvp.cjs",
+    "api:mvp": "python server/mvp_api.py serve",
+    "migrate:mvp": "python server/mvp_api.py migrate",
+    "bootstrap:mvp": "python server/mvp_api.py bootstrap",
+    "bootstrap:mvp:roles": "python server/mvp_api.py bootstrap-roles",
+    "import:legacy:access": "python scripts/import-filtered-legacy-access.py apply",
+    "verify:legacy:access": "python scripts/import-filtered-legacy-access.py verify",
+    "ensure:test:role-accounts": "python scripts/ensure-role-test-accounts.py apply",
+    "verify:test:role-accounts": "python scripts/ensure-role-test-accounts.py verify",
+    "test:legacy:accounts": "python scripts/test-filtered-legacy-accounts.py",
+    "test:role-accounts": "python scripts/test-role-representative-accounts.py",
+    "export:test:position-accounts": "python scripts/export-position-test-account-data.py --login-status 已通过",
+    "verify:mvp": "python server/mvp_api.py verify",
+    "test:mvp:rbac": "python scripts/test-mvp-rbac.py",
+    "docs:test:accounts": "python scripts/generate-account-access-test-doc.py",
+    "build:mvp": "node --openssl-legacy-provider ./node_modules/@vue/cli-service/bin/vue-cli-service.js build --mode mvp",
     "lint": "eslint --ext .js,.vue src",
-    "build:prod": "vue-cli-service build",
-    "build:stage": "vue-cli-service build --mode staging",
+    "build:prod": "node --openssl-legacy-provider ./node_modules/@vue/cli-service/bin/vue-cli-service.js build",
+    "build:stage": "node --openssl-legacy-provider ./node_modules/@vue/cli-service/bin/vue-cli-service.js build --mode staging",
     "preview": "node build/index.js --preview",
     "new": "plop",
     "svgo": "svgo -f src/icons/svg --config=src/icons/svgo.yml",
@@ -53,6 +69,7 @@
     "babel-eslint": "10.1.0",
     "babel-jest": "23.6.0",
     "babel-plugin-dynamic-import-node": "2.3.3",
+    "body-parser": "1.20.3",
     "chalk": "2.4.2",
     "chokidar": "2.1.5",
     "connect": "3.6.6",
@@ -68,6 +85,7 @@
     "sass-loader": "8.0.2",
     "script-ext-html-webpack-plugin": "2.1.3",
     "serve-static": "1.13.2",
+    "svg-baker-runtime": "1.4.0",
     "svg-sprite-loader": "4.1.3",
     "svgo": "1.2.0",
     "vue-template-compiler": "2.6.10"
@@ -82,6 +100,12 @@
   "engines": {
     "node": ">=8.9",
     "npm": ">= 3.0.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "raphael": "2.2.8",
+      "squire-rte": "1.5.1"
+    }
   },
   "keywords": [
     "vue",

@@ -9,6 +9,10 @@ const getters = {
   name: state => state.user.name,
   introduction: state => state.user.introduction,
   roles: state => state.user.roles,
+  roleNames: state => state.user.roleNames,
+  permissions: state => state.user.permissions,
+  storeIds: state => state.user.storeIds,
+  mustChangePassword: state => state.user.mustChangePassword,
   permission_routes: state => state.permission.routes,
   errorLogs: state => state.errorLog.logs
 }

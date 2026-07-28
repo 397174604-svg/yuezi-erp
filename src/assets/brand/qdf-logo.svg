@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 120" role="img" aria-labelledby="title desc">
+  <title id="title">奇德芬芳 Kid Fragrance</title>
+  <desc id="desc">奇德芬芳金色品牌标识</desc>
+  <g fill="#E7D4AC">
+    <path d="M19 109c18-1 30-8 39-22 8-13 14-31 20-54C84 10 96 2 119 3l-7 14c-14-2-22 5-27 24L72 88c-5 18-19 29-42 31l-11-10z"/>
+    <path d="M54 45h58v3H53z"/>
+    <circle cx="111" cy="46.5" r="6"/>
+    <path d="M112 38l7 7-7 7z"/>
+    <text x="151" y="52" font-family="'Noto Serif SC','Source Han Serif SC','Songti SC','STSong','SimSun',serif" font-size="31" font-weight="500" letter-spacing="9">奇德芬芳</text>
+    <text x="143" y="89" font-family="'Cinzel','Cormorant Garamond','Times New Roman',serif" font-size="23" font-weight="500" letter-spacing="3.2">KID FRAGRANCE</text>
+  </g>
+</svg>

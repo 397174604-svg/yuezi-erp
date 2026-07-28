@@ -1,0 +1,150 @@
+erDiagram
+    STAYS {
+        bigint stay_id PK
+        bigint room_id FK
+        datetime actual_check_in
+        datetime actual_check_out
+        string status
+    }
+    CARE_SUBJECTS {
+        bigint subject_id PK
+        bigint customer_id FK
+        string subject_type
+        string display_name
+        string risk_level
+    }
+    CARE_ASSESSMENTS {
+        bigint assessment_id PK
+        bigint stay_id FK
+        bigint subject_id FK
+        bigint template_version_id FK
+        string assessment_type
+        datetime assessed_at
+        string result_status
+    }
+    CARE_PLANS {
+        bigint care_plan_id PK
+        bigint stay_id FK
+        bigint subject_id FK
+        string plan_type
+        date effective_from
+        date effective_to
+        string status
+    }
+    CARE_PLAN_ITEMS {
+        bigint plan_item_id PK
+        bigint care_plan_id FK
+        bigint service_project_id FK
+        string frequency_type
+        decimal planned_quantity
+        string time_window
+    }
+    CARE_TASKS {
+        bigint care_task_id PK
+        bigint plan_item_id FK
+        bigint assignee_staff_id FK
+        datetime planned_at
+        datetime completed_at
+        string task_status
+        string exception_level
+    }
+    CARE_HANDOVERS {
+        bigint handover_id PK
+        bigint stay_id FK
+        bigint shift_id FK
+        bigint from_staff_id FK
+        bigint to_staff_id FK
+        datetime handed_over_at
+        string status
+    }
+    CARE_HANDOVER_ITEMS {
+        bigint handover_item_id PK
+        bigint handover_id FK
+        bigint subject_id FK
+        bigint care_task_id FK
+        string item_type
+        string urgency
+        text content
+    }
+    CARE_ROUNDS {
+        bigint round_id PK
+        bigint stay_id FK
+        bigint subject_id FK
+        bigint staff_id FK
+        datetime rounded_at
+        string round_type
+        string result_status
+    }
+    MEAL_PLANS {
+        bigint meal_plan_id PK
+        bigint stay_id FK
+        bigint subject_id FK
+        date effective_from
+        date effective_to
+        string stage_code
+        string status
+    }
+    MEAL_PLAN_ITEMS {
+        bigint meal_plan_item_id PK
+        bigint meal_plan_id FK
+        string meal_slot
+        bigint dish_id FK
+        date service_date
+        decimal planned_quantity
+    }
+    MEAL_ORDERS {
+        bigint meal_order_id PK
+        bigint stay_id FK
+        bigint meal_plan_item_id FK
+        datetime required_at
+        string allergy_check_status
+        string production_status
+    }
+    MEAL_DELIVERIES {
+        bigint delivery_id PK
+        bigint meal_order_id FK
+        bigint delivered_by_staff_id FK
+        datetime delivered_at
+        string delivery_status
+        string exception_reason
+    }
+    SERVICE_ISSUES {
+        bigint issue_id PK
+        bigint stay_id FK
+        bigint subject_id FK
+        string source_module
+        string issue_type
+        bigint responsible_department_id FK
+        datetime due_at
+        string status
+    }
+    SATISFACTION_SURVEYS {
+        bigint survey_id PK
+        bigint stay_id FK
+        bigint customer_id FK
+        string survey_stage
+        datetime scheduled_at
+        datetime completed_at
+        decimal score
+    }
+
+    STAYS ||--o{ CARE_ASSESSMENTS : "starts"
+    CARE_SUBJECTS ||--o{ CARE_ASSESSMENTS : "is assessed"
+    STAYS ||--o{ CARE_PLANS : "owns"
+    CARE_SUBJECTS ||--o{ CARE_PLANS : "receives"
+    CARE_PLANS ||--o{ CARE_PLAN_ITEMS : "contains"
+    CARE_PLAN_ITEMS ||--o{ CARE_TASKS : "generates"
+    STAYS ||--o{ CARE_HANDOVERS : "requires"
+    CARE_HANDOVERS ||--o{ CARE_HANDOVER_ITEMS : "contains"
+    CARE_SUBJECTS ||--o{ CARE_HANDOVER_ITEMS : "is handed over"
+    CARE_TASKS ||--o{ CARE_HANDOVER_ITEMS : "may remain open"
+    STAYS ||--o{ CARE_ROUNDS : "has"
+    CARE_SUBJECTS ||--o{ CARE_ROUNDS : "is observed"
+    STAYS ||--o{ MEAL_PLANS : "has"
+    CARE_SUBJECTS ||--o{ MEAL_PLANS : "receives"
+    MEAL_PLANS ||--o{ MEAL_PLAN_ITEMS : "schedules"
+    MEAL_PLAN_ITEMS ||--o{ MEAL_ORDERS : "creates"
+    MEAL_ORDERS ||--o| MEAL_DELIVERIES : "is delivered by"
+    STAYS ||--o{ SERVICE_ISSUES : "raises"
+    CARE_SUBJECTS ||--o{ SERVICE_ISSUES : "is affected by"
+    STAYS ||--o{ SATISFACTION_SURVEYS : "schedules"

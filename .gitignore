@@ -1,10 +1,13 @@
 .DS_Store
 node_modules/
+.pnpm-store/
 dist/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 **/*.log
+__pycache__/
+*.py[cod]
 
 tests/**/coverage/
 tests/e2e/reports
@@ -21,3 +24,20 @@ selenium-debug.log
 
 package-lock.json
 yarn.lock
+
+# Local sensitive import sources (employee/customer PII)
+.private/
+.deps/
+.local-deps/
+
+# Local crawl, audit and build artifacts
+.skill-build/
+.tmp/
+.tmp-*/
+tmp/
+output/
+妈妈宝盒/
+
+# Local runtime credentials
+.env.local
+.env.*.local

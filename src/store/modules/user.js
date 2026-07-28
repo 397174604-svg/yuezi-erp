@@ -7,7 +7,11 @@ const state = {
   name: '',
   avatar: '',
   introduction: '',
-  roles: []
+  roles: [],
+  roleNames: [],
+  permissions: [],
+  storeIds: [],
+  mustChangePassword: false
 }
 
 const mutations = {
@@ -25,6 +29,18 @@ const mutations = {
   },
   SET_ROLES: (state, roles) => {
     state.roles = roles
+  },
+  SET_ROLE_NAMES: (state, roleNames) => {
+    state.roleNames = roleNames
+  },
+  SET_PERMISSIONS: (state, permissions) => {
+    state.permissions = permissions
+  },
+  SET_STORE_IDS: (state, storeIds) => {
+    state.storeIds = storeIds
+  },
+  SET_MUST_CHANGE_PASSWORD: (state, mustChangePassword) => {
+    state.mustChangePassword = mustChangePassword
   }
 }
 
@@ -54,7 +70,16 @@ const actions = {
           reject('Verification failed, please Login again.')
         }
 
-        const { roles, name, avatar, introduction } = data
+        const {
+          roles,
+          roleNames = [],
+          name,
+          avatar,
+          introduction,
+          permissions = [],
+          storeIds = [],
+          mustChangePassword = false
+        } = data
 
         // roles must be a non-empty array
         if (!roles || roles.length <= 0) {
@@ -62,9 +87,13 @@ const actions = {
         }
 
         commit('SET_ROLES', roles)
+        commit('SET_ROLE_NAMES', roleNames)
         commit('SET_NAME', name)
         commit('SET_AVATAR', avatar)
         commit('SET_INTRODUCTION', introduction)
+        commit('SET_PERMISSIONS', permissions)
+        commit('SET_STORE_IDS', storeIds)
+        commit('SET_MUST_CHANGE_PASSWORD', mustChangePassword)
         resolve(data)
       }).catch(error => {
         reject(error)
@@ -78,6 +107,10 @@ const actions = {
       logout(state.token).then(() => {
         commit('SET_TOKEN', '')
         commit('SET_ROLES', [])
+        commit('SET_ROLE_NAMES', [])
+        commit('SET_PERMISSIONS', [])
+        commit('SET_STORE_IDS', [])
+        commit('SET_MUST_CHANGE_PASSWORD', false)
         removeToken()
         resetRouter()
 
@@ -97,6 +130,10 @@ const actions = {
     return new Promise(resolve => {
       commit('SET_TOKEN', '')
       commit('SET_ROLES', [])
+      commit('SET_ROLE_NAMES', [])
+      commit('SET_PERMISSIONS', [])
+      commit('SET_STORE_IDS', [])
+      commit('SET_MUST_CHANGE_PASSWORD', false)
       removeToken()
       resolve()
     })

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 150" role="img" aria-labelledby="title desc">
+  <title id="title">奇德芬芳</title>
+  <desc id="desc">奇德芬芳金色字母标</desc>
+  <g fill="#E7D4AC">
+    <path d="M8 139c19-1 32-9 41-24 9-15 15-36 22-62C78 25 91 13 116 14l-8 16c-15-2-24 6-29 27l-14 54c-6 20-21 33-46 36L8 139z"/>
+    <path d="M43 68h63v4H42z"/>
+    <circle cx="105" cy="70" r="7"/>
+    <path d="M106 60l9 9-9 9z"/>
+  </g>
+</svg>

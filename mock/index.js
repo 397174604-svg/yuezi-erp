@@ -5,12 +5,44 @@ const user = require('./user')
 const role = require('./role')
 const article = require('./article')
 const search = require('./remote-search')
+const erpFoundation = require('./erp-foundation')
+const mamaBox = require('./mama-box')
+const erpCustomer = require('./erp-customer')
+const erpSales = require('./erp-sales')
+const erpFinance = require('./erp-finance')
+const erpRoom = require('./erp-room')
+const erpNursing = require('./erp-nursing')
+const erpRehab = require('./erp-rehab')
+const erpDiet = require('./erp-diet')
+const erpInventory = require('./erp-inventory')
+const erpMall = require('./erp-mall')
+const erpRisk = require('./erp-risk')
+const erpReport = require('./erp-report')
+const erpBasic = require('./erp-basic')
+const erpSystem = require('./erp-system')
+const erpMaternityNurse = require('./erp-maternity-nurse')
 
 const mocks = [
   ...user,
   ...role,
   ...article,
-  ...search
+  ...search,
+  ...erpFoundation,
+  ...mamaBox,
+  ...erpCustomer,
+  ...erpSales,
+  ...erpFinance,
+  ...erpRoom,
+  ...erpNursing,
+  ...erpRehab,
+  ...erpDiet,
+  ...erpInventory,
+  ...erpMall,
+  ...erpRisk,
+  ...erpReport,
+  ...erpBasic,
+  ...erpSystem,
+  ...erpMaternityNurse
 ]
 
 // for front mock

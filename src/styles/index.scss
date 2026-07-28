@@ -7,10 +7,131 @@
 
 body {
   height: 100%;
+  color: #2B2620;
+  background: #FBF7F0;
   -moz-osx-font-smoothing: grayscale;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   font-family: Helvetica Neue, Helvetica, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Arial, sans-serif;
+}
+
+body,
+.el-button,
+.el-input,
+.el-select,
+.el-table {
+  font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+}
+
+.el-card__header {
+  padding: 16px 20px;
+  border-bottom-color: #eee7da;
+}
+
+.el-table th {
+  background: #F4ECDD;
+  color: #6E665A;
+  font-weight: 600;
+}
+
+// 奇德芬芳妈妈端同源的高奢金白主题
+:root {
+  --qdf-ivory: #FBF7F0;
+  --qdf-ivory-2: #F4ECDD;
+  --qdf-paper: #FFFFFF;
+  --qdf-ink: #2B2620;
+  --qdf-ink-2: #6E665A;
+  --qdf-muted: #A89E8D;
+  --qdf-gold: #B8945A;
+  --qdf-gold-deep: #8C6A36;
+  --qdf-gold-soft: #E7D4AC;
+  --qdf-night: #2A2620;
+  --qdf-hairline: rgba(140, 106, 54, .20);
+  --qdf-foil: linear-gradient(135deg, #E9D4A4 0%, #B8945A 52%, #8C6A36 100%);
+}
+
+#app .main-container,
+.app-main {
+  background: var(--qdf-ivory);
+}
+
+.app-container {
+  background: var(--qdf-ivory);
+  color: var(--qdf-ink);
+}
+
+.el-card,
+.el-dialog,
+.el-drawer,
+.el-popover,
+.el-dropdown-menu,
+.el-select-dropdown {
+  border-color: var(--qdf-hairline);
+  background: var(--qdf-paper);
+}
+
+.el-card {
+  box-shadow: 0 12px 34px -24px rgba(74, 55, 26, .35);
+}
+
+.el-button--primary,
+.el-button--primary:focus {
+  border-color: #B8945A;
+  background: var(--qdf-foil);
+}
+
+.el-button--primary:hover,
+.el-button--primary:active {
+  border-color: #8C6A36;
+  background: linear-gradient(135deg, #dfc48d, #a37d42);
+}
+
+.el-button--primary.is-plain {
+  color: #8C6A36;
+  border-color: #d9c49d;
+  background: #fffaf1;
+}
+
+.el-input__inner:hover,
+.el-select:hover .el-input__inner {
+  border-color: #cdb78f;
+}
+
+.el-input__inner:focus,
+.el-select .el-input.is-focus .el-input__inner {
+  border-color: #B8945A;
+}
+
+.el-pagination.is-background .el-pager li:not(.disabled).active,
+.el-radio-button__orig-radio:checked + .el-radio-button__inner,
+.el-checkbox__input.is-checked .el-checkbox__inner,
+.el-checkbox__input.is-indeterminate .el-checkbox__inner {
+  border-color: #B8945A;
+  background: #B8945A;
+}
+
+.el-tabs__active-bar {
+  background-color: #B8945A;
+}
+
+.el-tabs__item.is-active,
+.el-tabs__item:hover,
+.el-link.el-link--primary {
+  color: #8C6A36;
+}
+
+.el-table::before,
+.el-table--group::after,
+.el-table--border::after {
+  background-color: #e6ddcf;
+}
+
+.el-table--striped .el-table__body tr.el-table__row--striped td {
+  background: #fcfaf6;
+}
+
+.el-table__body tr:hover > td {
+  background-color: #fbf4e8 !important;
 }
 
 label {

@@ -5,7 +5,15 @@ import { asyncRoutes, constantRoutes } from '@/router'
  * @param roles
  * @param route
  */
-function hasPermission(roles, route) {
+function hasPermission(roles, permissions, route) {
+  if (roles.includes('SYS_ADMIN')) return true
+  if (route.meta && route.meta.permissions) {
+    return route.meta.permissions.some(permission => permissions.includes(permission))
+  }
+  if (route.meta && route.meta.legacyNavId) {
+    const codePrefix = `LEGACY.WEB.N${route.meta.legacyNavId}.`
+    return permissions.some(permission => permission.startsWith(codePrefix))
+  }
   if (route.meta && route.meta.roles) {
     return roles.some(role => route.meta.roles.includes(role))
   } else {
@@ -18,16 +26,19 @@ function hasPermission(roles, route) {
  * @param routes asyncRoutes
  * @param roles
  */
-export function filterAsyncRoutes(routes, roles) {
+export function filterAsyncRoutes(routes, roles, permissions = []) {
   const res = []
 
   routes.forEach(route => {
     const tmp = { ...route }
-    if (hasPermission(roles, tmp)) {
+    if (hasPermission(roles, permissions, tmp)) {
+      const hadChildren = Boolean(tmp.children && tmp.children.length)
       if (tmp.children) {
-        tmp.children = filterAsyncRoutes(tmp.children, roles)
+        tmp.children = filterAsyncRoutes(tmp.children, roles, permissions)
       }
-      res.push(tmp)
+      if (!hadChildren || tmp.children.length) {
+        res.push(tmp)
+      }
     }
   })
 
@@ -47,13 +58,17 @@ const mutations = {
 }
 
 const actions = {
-  generateRoutes({ commit }, roles) {
+  generateRoutes({ commit, rootGetters }, roles) {
     return new Promise(resolve => {
       let accessedRoutes
-      if (roles.includes('admin')) {
+      if (roles.includes('SYS_ADMIN')) {
         accessedRoutes = asyncRoutes || []
       } else {
-        accessedRoutes = filterAsyncRoutes(asyncRoutes, roles)
+        accessedRoutes = filterAsyncRoutes(
+          asyncRoutes,
+          roles,
+          rootGetters.permissions || []
+        )
       }
       commit('SET_ROUTES', accessedRoutes)
       resolve(accessedRoutes)

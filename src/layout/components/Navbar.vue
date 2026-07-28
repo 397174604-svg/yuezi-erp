@@ -1,44 +1,21 @@
 <template>
   <div class="navbar">
     <hamburger id="hamburger-container" :is-active="sidebar.opened" class="hamburger-container" @toggleClick="toggleSideBar" />
-
-    <breadcrumb id="breadcrumb-container" class="breadcrumb-container" />
-
+    <div class="menu-label">全部菜单</div>
+    <div class="global-search"><i class="el-icon-search" /><input v-model="keyword" placeholder="请输入客户姓名、电话或房间号" @keyup.enter="searchCustomer"></div>
     <div class="right-menu">
-      <template v-if="device!=='mobile'">
-        <search id="header-search" class="right-menu-item" />
-
-        <error-log class="errLog-container right-menu-item hover-effect" />
-
-        <screenfull id="screenfull" class="right-menu-item hover-effect" />
-
-        <el-tooltip content="Global Size" effect="dark" placement="bottom">
-          <size-select id="size-select" class="right-menu-item hover-effect" />
-        </el-tooltip>
-
-      </template>
-
-      <el-dropdown class="avatar-container right-menu-item hover-effect" trigger="click">
-        <div class="avatar-wrapper">
-          <img :src="avatar+'?imageView2/1/w/80/h/80'" class="user-avatar">
-          <i class="el-icon-caret-bottom" />
-        </div>
+      <el-select v-if="device !== 'mobile'" v-model="store" class="store-select" size="mini">
+        <el-option v-for="item in allowedStores" :key="item.id" :label="item.name" :value="item.name" />
+      </el-select>
+      <el-tooltip content="帮助文档" placement="bottom"><span class="nav-action"><i class="el-icon-question" /></span></el-tooltip>
+      <el-badge :value="319" :max="99" class="message-badge"><span class="nav-action"><i class="el-icon-message-solid" /></span></el-badge>
+      <el-dropdown class="avatar-container" trigger="click">
+        <div class="user-chip"><span class="avatar">{{ avatarText }}</span><div><b>{{ name || 'admin' }}</b><small>{{ roleLabel }}</small></div><i class="el-icon-arrow-down" /></div>
         <el-dropdown-menu slot="dropdown">
-          <router-link to="/profile/index">
-            <el-dropdown-item>Profile</el-dropdown-item>
-          </router-link>
-          <router-link to="/">
-            <el-dropdown-item>Dashboard</el-dropdown-item>
-          </router-link>
-          <a target="_blank" href="https://github.com/PanJiaChen/vue-element-admin/">
-            <el-dropdown-item>Github</el-dropdown-item>
-          </a>
-          <a target="_blank" href="https://panjiachen.github.io/vue-element-admin-site/#/">
-            <el-dropdown-item>Docs</el-dropdown-item>
-          </a>
-          <el-dropdown-item divided @click.native="logout">
-            <span style="display:block;">Log Out</span>
-          </el-dropdown-item>
+          <router-link to="/profile/index"><el-dropdown-item icon="el-icon-user">个人中心</el-dropdown-item></router-link>
+          <router-link to="/"><el-dropdown-item icon="el-icon-s-home">系统首页</el-dropdown-item></router-link>
+          <el-dropdown-item icon="el-icon-key">修改密码</el-dropdown-item>
+          <el-dropdown-item divided icon="el-icon-switch-button" @click.native="logout">退出登录</el-dropdown-item>
         </el-dropdown-menu>
       </el-dropdown>
     </div>
@@ -47,121 +24,57 @@
 
 <script>
 import { mapGetters } from 'vuex'
-import Breadcrumb from '@/components/Breadcrumb'
 import Hamburger from '@/components/Hamburger'
-import ErrorLog from '@/components/ErrorLog'
-import Screenfull from '@/components/Screenfull'
-import SizeSelect from '@/components/SizeSelect'
-import Search from '@/components/HeaderSearch'
 
 export default {
-  components: {
-    Breadcrumb,
-    Hamburger,
-    ErrorLog,
-    Screenfull,
-    SizeSelect,
-    Search
+  components: { Hamburger },
+  data() {
+    return {
+      keyword: '',
+      store: '',
+      storeOptions: [
+        { id: 1, name: '中心广场旗舰店' },
+        { id: 2, name: '黄河路轻奢店' }
+      ]
+    }
   },
   computed: {
-    ...mapGetters([
-      'sidebar',
-      'avatar',
-      'device'
-    ])
+    ...mapGetters(['sidebar', 'device', 'name', 'roles', 'roleNames', 'storeIds']),
+    allowedStores() {
+      if (this.roles.includes('SYS_ADMIN')) return this.storeOptions
+      return this.storeOptions.filter(item => this.storeIds.map(Number).includes(item.id))
+    },
+    avatarText() {
+      return (this.name || '管').slice(0, 1)
+    },
+    roleLabel() {
+      const labels = {
+        SYS_ADMIN: '系统管理员',
+        SALES_MANAGER: '销售经理',
+        RECOVERY_THERAPIST: '产康师',
+        HOUSEKEEPER: '客房管家'
+      }
+      return this.roleNames[0] || labels[this.roles[0]] || '业务人员'
+    }
+  },
+  watch: {
+    allowedStores: {
+      immediate: true,
+      handler(stores) {
+        if (!stores.some(item => item.name === this.store)) {
+          this.store = stores.length ? stores[0].name : ''
+        }
+      }
+    }
   },
   methods: {
-    toggleSideBar() {
-      this.$store.dispatch('app/toggleSideBar')
-    },
-    async logout() {
-      await this.$store.dispatch('user/logout')
-      this.$router.push(`/login?redirect=${this.$route.fullPath}`)
-    }
+    toggleSideBar() { this.$store.dispatch('app/toggleSideBar') },
+    searchCustomer() { if (!this.keyword) return this.$message.warning('请输入客户姓名、电话或房间号'); this.$router.push({ path: '/customer/item-1', query: { keyword: this.keyword }}) },
+    async logout() { await this.$store.dispatch('user/logout'); this.$router.push(`/login?redirect=${this.$route.fullPath}`) }
   }
 }
 </script>
 
 <style lang="scss" scoped>
-.navbar {
-  height: 50px;
-  overflow: hidden;
-  position: relative;
-  background: #fff;
-  box-shadow: 0 1px 4px rgba(0,21,41,.08);
-
-  .hamburger-container {
-    line-height: 46px;
-    height: 100%;
-    float: left;
-    cursor: pointer;
-    transition: background .3s;
-    -webkit-tap-highlight-color:transparent;
-
-    &:hover {
-      background: rgba(0, 0, 0, .025)
-    }
-  }
-
-  .breadcrumb-container {
-    float: left;
-  }
-
-  .errLog-container {
-    display: inline-block;
-    vertical-align: top;
-  }
-
-  .right-menu {
-    float: right;
-    height: 100%;
-    line-height: 50px;
-
-    &:focus {
-      outline: none;
-    }
-
-    .right-menu-item {
-      display: inline-block;
-      padding: 0 8px;
-      height: 100%;
-      font-size: 18px;
-      color: #5a5e66;
-      vertical-align: text-bottom;
-
-      &.hover-effect {
-        cursor: pointer;
-        transition: background .3s;
-
-        &:hover {
-          background: rgba(0, 0, 0, .025)
-        }
-      }
-    }
-
-    .avatar-container {
-      margin-right: 30px;
-
-      .avatar-wrapper {
-        margin-top: 5px;
-        position: relative;
-
-        .user-avatar {
-          cursor: pointer;
-          width: 40px;
-          height: 40px;
-          border-radius: 10px;
-        }
-
-        .el-icon-caret-bottom {
-          cursor: pointer;
-          position: absolute;
-          right: -20px;
-          top: 25px;
-          font-size: 12px;
-        }
-      }
-    }
-  }
-}
+.navbar{height:58px;display:flex;align-items:center;position:relative;background:#fffdf9;border-bottom:1px solid rgba(140,106,54,.16);box-shadow:0 8px 24px -24px rgba(74,55,26,.55)}.hamburger-container{height:58px;line-height:58px;cursor:pointer;transition:.2s}.hamburger-container:hover{background:#fbf4e8}.menu-label{font-size:13px;color:#6e665a;padding-right:24px;border-right:1px solid #eee7da}.global-search{height:36px;width:330px;margin-left:22px;display:flex;align-items:center;gap:9px;color:#a89e8d}.global-search input{border:0;outline:0;width:100%;font-size:12px;color:#2b2620;background:transparent}.right-menu{margin-left:auto;height:100%;display:flex;align-items:center;gap:12px;padding-right:20px}.store-select{width:150px}.nav-action{display:grid;place-items:center;width:34px;height:34px;border-radius:8px;color:#8f8474;cursor:pointer}.nav-action:hover{background:#f4ecdd;color:#8c6a36}.message-badge{display:flex}.user-chip{display:flex;align-items:center;gap:9px;padding-left:8px;cursor:pointer}.avatar{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;color:#fff;background:linear-gradient(135deg,#e9d4a4,#b8945a 52%,#8c6a36);font-size:13px}.user-chip>div{display:flex;flex-direction:column;line-height:1.3}.user-chip b{font-size:12px;color:#2b2620}.user-chip small{font-size:9px;color:#a89e8d}.user-chip>i{font-size:10px;color:#a89e8d}@media(max-width:900px){.global-search,.menu-label,.store-select{display:none}.right-menu{gap:5px;padding-right:10px}.user-chip>div,.user-chip>i{display:none}}
 </style>
