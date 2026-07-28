@@ -29,6 +29,25 @@
 
 本项目的管理端界面基于 [vue-element-admin](https://github.com/PanJiaChen/vue-element-admin) 二次开发，并针对奇德芬芳品牌完成金白主题、导航、Logo、业务菜单和工作台改造。
 
+## 界面预览
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="./docs/日报附件/2026-07-23-房态图.png" alt="客房管理房态图">
+      <br>
+      <sub>客房管理 · 房态图与入住排程</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="./docs/日报附件/2026-07-23-系统设置工作台.png" alt="系统设置组织工作台">
+      <br>
+      <sub>系统设置 · 门店、部门、员工与角色</sub>
+    </td>
+  </tr>
+</table>
+
+> 截图中的客户和员工信息均为演示数据，不代表真实业务记录。
+
 ## 当前实现
 
 ### 核心业务
