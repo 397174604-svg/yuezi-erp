@@ -34,9 +34,9 @@
 <table>
   <tr>
     <td width="50%" align="center">
-      <img src="./docs/screenshots/customer-entry.png" alt="客户管理客户录入">
+      <img src="./docs/screenshots/customer-entry.png" alt="客户管理客户中心">
       <br>
-      <sub>客户管理 · 客户录入、完整度检查与归属追踪</sub>
+      <sub>客户管理 · 客户中心、转化漏斗与入住主链路</sub>
     </td>
     <td width="50%" align="center">
       <img src="./docs/screenshots/dashboard.png" alt="奇德芬芳 ERP 系统首页">
