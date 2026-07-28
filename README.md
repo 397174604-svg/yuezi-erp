@@ -34,14 +34,14 @@
 <table>
   <tr>
     <td width="50%" align="center">
-      <img src="./docs/日报附件/2026-07-23-房态图.png" alt="客房管理房态图">
+      <img src="./docs/screenshots/customer-entry.png" alt="客户管理客户录入">
       <br>
-      <sub>客房管理 · 房态图与入住排程</sub>
+      <sub>客户管理 · 客户录入、完整度检查与归属追踪</sub>
     </td>
     <td width="50%" align="center">
-      <img src="./docs/日报附件/2026-07-23-系统设置工作台.png" alt="系统设置组织工作台">
+      <img src="./docs/screenshots/dashboard.png" alt="奇德芬芳 ERP 系统首页">
       <br>
-      <sub>系统设置 · 门店、部门、员工与角色</sub>
+      <sub>系统首页 · 经营概览、房态、待办流程与业务预警</sub>
     </td>
   </tr>
 </table>
