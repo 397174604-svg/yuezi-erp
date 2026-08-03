@@ -2,7 +2,7 @@
   <div class="room-workbench">
     <section class="page-heading">
       <div>
-        <div class="eyebrow"><i :class="config.icon" /> 客房管理 · 原 ERP 字段级复刻</div>
+        <div class="eyebrow"><i :class="config.icon" /> 开派月子会所 · 房务运营</div>
         <h1>{{ pageTitle }}</h1>
         <p>{{ config.description }}</p>
       </div>
@@ -83,7 +83,7 @@
       <div slot="header" class="card-heading">
         <div>
           <h2>查询条件</h2>
-          <p>字段、枚举和默认值按原客房页面独立配置</p>
+          <p>按门店、房型、楼层和房态查看当前可用情况</p>
         </div>
         <div class="query-actions">
           <el-button type="primary" size="small" icon="el-icon-search" @click="search">查询</el-button>
@@ -123,8 +123,9 @@
                 filterable
                 :placeholder="field.placeholder || '请选择'"
                 class="full-control"
+                @change="handleFilterChange(field.key)"
               >
-                <el-option v-for="option in field.options" :key="option" :label="option" :value="option" />
+                <el-option v-for="option in fieldOptions(field)" :key="option" :label="option" :value="option" />
               </el-select>
               <el-date-picker
                 v-else-if="field.type === 'date'"
@@ -283,7 +284,6 @@
     </el-card>
 
     <el-dialog :title="dialogTitle" :visible.sync="dialogVisible" width="780px" top="6vh" :close-on-click-modal="false">
-      <el-alert title="提交后将写入当前门店的 MySQL 客房业务记录，并保留操作审计。" type="info" :closable="false" show-icon class="dialog-alert" />
       <el-form :model="dialogForm" label-position="top" class="dialog-form">
         <el-row :gutter="18">
           <el-col v-for="field in dialogFields" :key="field.key" :span="field.type === 'textarea' ? 24 : 12">
@@ -309,7 +309,7 @@
       <div v-if="currentRow" class="detail-drawer">
         <div class="detail-head">
           <strong>{{ recordName(currentRow) }}</strong>
-          <el-tag size="small" type="success">MySQL 实时数据</el-tag>
+          <el-tag size="small" type="success">实时业务数据</el-tag>
         </div>
         <el-descriptions :column="1" border size="small">
           <el-descriptions-item v-for="column in drawerColumns" :key="column.key" :label="column.label">
@@ -388,13 +388,19 @@ export default {
     pageTitle() {
       return this.$route.meta.title
     },
+    configTitle() {
+      return this.$route.meta.configTitle || this.pageTitle
+    },
     config() {
-      return getRoomPageConfig(this.pageTitle)
+      return getRoomPageConfig(this.configTitle)
     },
     visibleActions() {
+      const actions = this.config.mode === 'room-map'
+        ? []
+        : this.config.actions
       return visibleRoomActions(
         this.config.key,
-        this.config.actions,
+        actions,
         this.permissions,
         this.roles
       )
@@ -498,7 +504,7 @@ export default {
     }
   },
   watch: {
-    '$route.meta.title': {
+    '$route.fullPath': {
       immediate: true,
       handler() {
         this.initialize()
@@ -506,6 +512,29 @@ export default {
     }
   },
   methods: {
+    fieldOptions(field) {
+      if (this.config.mode !== 'room-map' || field.key !== 'roomType') return field.options || []
+      const store = this.canonicalStoreName(this.filters.store)
+      const available = new Set(
+        this.rows
+          .filter(row => !store || this.canonicalStoreName(row.store) === store)
+          .map(row => row.roomType)
+          .filter(Boolean)
+      )
+      return (field.options || []).filter(option => available.has(option))
+    },
+    async handleFilterChange(key) {
+      if (key !== 'store' || this.config.mode !== 'room-map') return
+      const roomTypeField = this.config.filters.find(field => field.key === 'roomType')
+      if (this.filters.roomType && roomTypeField && !this.fieldOptions(roomTypeField).includes(this.filters.roomType)) {
+        this.$set(this.filters, 'roomType', '')
+      }
+      // The in-page store selector is a real scope switch, not only a local
+      // form value.  Keep it in step with the header-driven route scope and
+      // immediately reload the matching store's room inventory.
+      this.pagination.page = 1
+      await this.loadData()
+    },
     canUseAction(action) {
       return canUseRoomAction(
         this.config.key,
@@ -520,6 +549,10 @@ export default {
         return result
       }, {})
       Object.entries(this.config.defaultFilters || {}).forEach(([key, value]) => this.$set(this.filters, key, Array.isArray(value) ? [...value] : value))
+      const routeStore = this.routeStoreName()
+      if (routeStore && this.config.filters.some(field => field.key === 'store')) {
+        this.$set(this.filters, 'store', routeStore)
+      }
       this.pagination = { page: 1, size: 15 }
       this.selection = []
       this.currentRow = null
@@ -570,6 +603,12 @@ export default {
       if (value.includes('黄河路')) return '黄河路轻奢店'
       if (value.includes('中心广场') || value.includes('建设路')) return '中心广场旗舰店'
       return value
+    },
+    routeStoreName() {
+      const storeId = Number(this.$route.query.storeId)
+      if (storeId === 1) return '中心广场旗舰店'
+      if (storeId === 2) return '黄河路轻奢店'
+      return this.canonicalStoreName(this.$route.query.store)
     },
     syncEndDate() {
       if (!this.filters.startDate || !this.filters.days || this.filters.endDate === undefined) return
@@ -884,10 +923,10 @@ export default {
 
 <style lang="scss" scoped>
 .room-workbench { min-height: calc(100vh - 84px); padding: 22px; color: #26354c; background: #f3f6fa; }
-.page-heading { padding: 26px 30px; border-radius: 16px; color: #fff; background: linear-gradient(125deg, #164c48 0%, #237d72 54%, #45b8ac 100%); box-shadow: 0 14px 34px rgba(28, 101, 92, .22); }
-.eyebrow { margin-bottom: 9px; color: #c9fff8; font-size: 13px; font-weight: 700; letter-spacing: .7px; }
+.page-heading { padding: 26px 30px; border-radius: 16px; color: #fff; background: linear-gradient(125deg, #28241e 0%, #5f4b2d 56%, #a68045 100%); box-shadow: 0 14px 34px rgba(74, 55, 26, .2); }
+.eyebrow { margin-bottom: 9px; color: #f3dfb7; font-size: 13px; font-weight: 700; letter-spacing: .7px; }
 .page-heading h1 { margin: 0 0 9px; font-size: 27px; }
-.page-heading p { max-width: 820px; margin: 0; color: #d8fff9; font-size: 14px; line-height: 1.7; }
+.page-heading p { max-width: 820px; margin: 0; color: #f7efe0; font-size: 14px; line-height: 1.7; }
 .content-card { margin-top: 16px; border: 0; border-radius: 12px; }
 .action-card ::v-deep .el-card__body { padding: 14px 18px; }
 .business-actions, .query-actions { display: flex; flex-wrap: wrap; gap: 7px; }

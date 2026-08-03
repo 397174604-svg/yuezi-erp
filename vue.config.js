@@ -1,6 +1,9 @@
 'use strict'
 const path = require('path')
 const defaultSettings = require('./src/settings.js')
+const enableMockServer =
+  process.env.VUE_APP_ENABLE_MOCK !== 'false' &&
+  process.env.VUE_APP_RUNTIME_MODE !== 'mvp'
 
 function resolve(dir) {
   return path.join(__dirname, dir)
@@ -37,7 +40,7 @@ module.exports = {
       warnings: false,
       errors: true
     },
-    before: require('./mock/mock-server.js')
+    before: enableMockServer ? require('./mock/mock-server.js') : () => {}
   },
   configureWebpack: {
     // provide the app's title in webpack's name field, so that

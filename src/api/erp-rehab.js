@@ -1,17 +1,19 @@
 import request from '@/utils/request'
 
-export function getRehabOptions() {
+export function getRehabOptions(requestOptions = {}) {
   return request({
     url: '/vue-element-admin/erp/rehab/options',
-    method: 'get'
+    method: 'get',
+    ...requestOptions
   })
 }
 
-export function getRehabModuleData(resource, params) {
+export function getRehabModuleData(resource, params, requestOptions = {}) {
   return request({
     url: `/vue-element-admin/erp/rehab/modules/${resource}`,
     method: 'get',
-    params
+    params,
+    ...requestOptions
   })
 }
 

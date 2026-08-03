@@ -5,6 +5,9 @@ const stores = ['中心广场旗舰店', '黄河路轻奢店']
 
 const input = (key, label, required = false) => ({ key, label, type: 'input', required, verified: false })
 const select = (key, label, options, required = false) => ({ key, label, type: 'select', options, required, verified: false })
+const roomSelect = (required = false) => ({ key: 'room', label: '房间号', type: 'room-select', options: [], required, verified: false })
+const customerSelect = (required = false) => ({ key: 'customerName', label: '客户姓名', type: 'customer-select', options: [], required, verified: false })
+const dishSelect = (required = false) => ({ key: 'dishName', label: '菜品/套餐', type: 'dish-select', options: [], required, verified: false })
 const date = (key, label, required = false) => ({ key, label, type: 'date', required, verified: false })
 const dateRange = (key, label) => ({ key, label, type: 'dateRange', verified: false })
 const number = (key, label, required = false) => ({ key, label, type: 'number', required, verified: false })
@@ -35,12 +38,12 @@ const commonMeta = {
 const withMeta = config => ({ ...commonMeta, ...config })
 
 const customerMealFields = [
-  input('customerName', '客户姓名', true),
-  input('room', '房间号', true),
+  customerSelect(true),
+  roomSelect(true),
   select('store', '门店', stores, true),
   date('mealDate', '用餐日期', true),
   select('mealType', '餐次', mealTypes, true),
-  input('dishName', '菜品名称', true),
+  dishSelect(true),
   number('quantity', '数量', true),
   input('dietitian', '营养师'),
   textarea('taboo', '饮食禁忌'),
@@ -57,7 +60,7 @@ const dishFields = [
   input('ingredients', '主要食材'),
   input('nutrition', '营养说明'),
   input('tabooTag', '禁忌标签'),
-  select('store', '所属门店', stores),
+  select('store', '所属门店', stores, true),
   switchField('enabled', '是否启用'),
   textarea('remark', '备注')
 ]
@@ -90,13 +93,13 @@ const soupFields = [
 ]
 
 const orderFields = [
-  input('customerName', '客户姓名', true),
-  input('room', '房间号'),
+  customerSelect(true),
+  roomSelect(),
   select('store', '门店', stores, true),
   select('customerType', '客户类型', ['入住客户', '散客', '陪护人员', '员工'], true),
   date('mealDate', '用餐日期', true),
   select('mealType', '餐次', mealTypes, true),
-  input('dishName', '菜品/套餐', true),
+  dishSelect(true),
   number('quantity', '数量', true),
   number('amount', '金额'),
   select('paymentMethod', '结算方式', ['合同套餐', '餐卡', '现金', '微信', '支付宝', '挂账']),
@@ -371,6 +374,43 @@ export const dietPageConfigs = {
 
 applyOriginalEvidence('diet', dietPageConfigs)
 applyAuditedSurfaceEvidence('diet', dietPageConfigs)
+
+const integratedAlias = (baseTitle, overrides) => ({
+  ...dietPageConfigs[baseTitle],
+  evidenceLevel: '业务数据闭环',
+  completionLevel: '已启用',
+  evidenceNote: '新增、编辑与配送状态操作按门店保存并写入审计事件。营养与禁忌内容均由授权人员人工录入。',
+  ...overrides
+})
+
+dietPageConfigs.订餐配送 = integratedAlias('订餐列表', {
+  key: 'meal-orders',
+  description: '按门店登记订餐并流转待备餐、备餐中、配送中、已签收和退餐状态。'
+})
+dietPageConfigs.月子餐库 = integratedAlias('菜品管理', {
+  key: 'dishes',
+  description: '维护月子餐菜品、餐次、食材说明与人工营养标签。'
+})
+
+function configureSharedWorkbench(titles, primaryTitle, capabilityId, capabilityName) {
+  const tabs = titles.map(title => ({
+    title,
+    label: title === primaryTitle ? `${title}（${capabilityId}）` : `${title}（兼容入口）`
+  }))
+  titles.forEach(title => {
+    const config = dietPageConfigs[title]
+    config.workspace = {
+      primaryTitle,
+      capabilityId,
+      capabilityName,
+      tabs,
+      note: `${capabilityId} ${capabilityName}已收敛为同一工作台；兼容入口与正式入口使用同一门店数据和状态流转。`
+    }
+  })
+}
+
+configureSharedWorkbench(['订餐配送', '订餐列表'], '订餐配送', 'F028', '订餐配送')
+configureSharedWorkbench(['月子餐库', '菜品管理'], '月子餐库', 'F029', '月子餐库')
 
 export function getDietPageConfig(title) {
   return dietPageConfigs[title] || dietPageConfigs.客户餐单

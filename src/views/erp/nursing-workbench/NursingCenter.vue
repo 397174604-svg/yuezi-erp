@@ -1,14 +1,13 @@
 <template>
   <div class="care-center">
     <header class="center-toolbar">
-      <h2>护理中心预览</h2>
-      <el-select v-model="filters.store" size="small" class="store-select">
+      <h2>护理中心</h2>
+      <el-select v-model="filters.store" size="small" class="store-select" @change="handleStoreChange">
         <el-option v-for="store in storeOptions" :key="store.value" :label="store.label" :value="store.value" />
       </el-select>
       <el-select v-model="filters.careLevel" size="small" class="level-select">
         <el-option v-for="level in careLevelOptions" :key="level.value" :label="level.label" :value="level.value" />
       </el-select>
-      <span class="evidence-note">脱敏演示数据</span>
     </header>
 
     <div class="center-layout">
@@ -63,7 +62,7 @@
           <section v-for="group in floorGroups" :key="group.floor" class="floor-group">
             <header class="floor-heading">
               <div>
-                <strong>{{ group.floor }}楼</strong>
+                <strong>{{ group.floor === '未分层' ? group.floor : `${group.floor}楼` }}</strong>
                 <span>（客户数量：{{ group.clients.length }}，宝宝数量：{{ group.babyCount }}）</span>
               </div>
               <button type="button" @click="toggleFloor(group.floor)">
@@ -176,8 +175,13 @@
       :record-type="careRecordType"
       :client="activeClient"
       :baby="activeBaby"
+      @saved="saveCareRecord"
     />
-    <nursing-baby-dialog :visible.sync="babyDialogVisible" :client="activeClient" />
+    <nursing-baby-dialog
+      :visible.sync="babyDialogVisible"
+      :client="activeClient"
+      @saved="saveBaby"
+    />
     <nursing-legacy-action-dialog
       :visible.sync="legacyActionVisible"
       :action="activeAction"
@@ -195,14 +199,8 @@
         <div><span>业务入口：</span><b>{{ activeAction }}</b></div>
         <div><span>房间号：</span><b>{{ activeClient.room || '—' }}</b></div>
         <div><span>客户姓名：</span><b>{{ activeClient.customerName || '—' }}</b></div>
-        <div><span>原系统路径：</span><code>{{ activeActionPath }}</code></div>
+        <div><span>后续处理：</span><b>进入对应业务页面继续办理</b></div>
       </div>
-      <el-alert
-        title="该入口已按原护理中心的位置和打开规则保留；二级页面数据与提交仍为脱敏演示，不会操作真实 ERP。"
-        type="warning"
-        :closable="false"
-        show-icon
-      />
       <div slot="footer">
         <el-button @click="actionDialogVisible = false">关闭</el-button>
       </div>
@@ -211,14 +209,42 @@
 </template>
 
 <script>
+import { mapGetters } from 'vuex'
 import NursingBabyDialog from './NursingBabyDialog'
 import NursingCareRecordDialog from './NursingCareRecordDialog'
 import NursingLegacyActionDialog from './NursingLegacyActionDialog'
+import { getNursingModuleData, saveNursingModuleRecord } from '@/api/erp-nursing'
 
 const STORE_OPTIONS = [
-  { value: '6', label: '中心广场旗舰店' },
-  { value: '21', label: '黄河路轻奢店' }
+  { value: '1', label: '中心广场旗舰店' },
+  { value: '2', label: '黄河路轻奢店' }
 ]
+
+const STORE_VALUE_BY_ROUTE_ID = {
+  1: '1',
+  2: '2'
+}
+
+const ROUTE_ID_BY_STORE_VALUE = {
+  1: '1',
+  2: '2'
+}
+
+function routeStoreValue(route, currentStoreId = '1') {
+  const current = STORE_VALUE_BY_ROUTE_ID[Number(currentStoreId)]
+  if (current) return current
+  const query = (route && route.query) || {}
+  const byId = STORE_VALUE_BY_ROUTE_ID[Number(query.storeId)]
+  if (byId) return byId
+  const byName = STORE_OPTIONS.find(item => item.label === query.store)
+  if (byName) return byName.value
+
+  const storeName = String(query.store || '')
+  if (storeName.includes('黄河路')) return '2'
+  if (storeName.includes('中心') || storeName.includes('建设路')) return '1'
+
+  return '1'
+}
 
 const CARE_LEVEL_OPTIONS = [
   { value: '-1', label: '选择护理等级' },
@@ -238,70 +264,7 @@ const CARD_ACTIONS = [
   '外出申请'
 ]
 
-const ACTION_PATHS = {
-  产康服务预约: 'Page/GuestRoomManger/CustomerFWYYAdd.aspx',
-  产康服务确认: 'Page/NursingManager/UserConfirmAdd1.aspx',
-  护理计划单: 'Page/NursingManager/NursingPlanSelect.aspx',
-  妈妈护理记录: 'Page/NurseManagerNew/MaternalCareLogList.aspx',
-  产康服务记录: 'Page/NursingManager/NursingPlanManger.aspx',
-  月嫂服务记录: 'Page/NursingManager/MomServerLogList.aspx',
-  医生查房记录: 'Page/NursingManager/CheckRecord.aspx',
-  健康评估: 'Page/NurseManagerNew/HealthAssessmentList.aspx',
-  外出申请: 'Page/NursingManager/OutRecord.aspx',
-  护理计划确认: 'Page/ServiceCenter/NursingPlanOK.aspx',
-  待服务: 'Page/NursingManager/ProjectScheduling.aspx?view=listDay',
-  入住评估单: 'Page/NursingManager/NursingPlan1.aspx'
-}
-
 const LEGACY_ACTIONS = [...CARD_ACTIONS, '护理计划确认']
-
-const DEMO_CLIENTS = [
-  {
-    id: 'NC-DEMO-001', store: '6', mode: '0', floor: '3', room: 'A301', customerName: '演示客户01',
-    status: 'normal', careLevel: '519', careLevelLabel: '一级护理', careType: '一对一护理', careColor: '#6da7dc',
-    delivery: '顺产', sameRoom: true, pendingCare: true, motherOut: false, appointmentCount: 3,
-    babies: [{ id: 'BABY-DEMO-001', name: '演示宝宝A', gender: '男', status: 'normal', outside: false }]
-  },
-  {
-    id: 'NC-DEMO-002', store: '6', mode: '0', floor: '3', room: 'A306', customerName: '演示客户02',
-    status: 'abnormal', careLevel: '520', careLevelLabel: '二级护理', careType: '一对多护理', careColor: '#9a80d8',
-    delivery: '剖腹产', sameRoom: false, pendingCare: false, motherOut: false, appointmentCount: 0,
-    babies: [{ id: 'BABY-DEMO-002', name: '演示宝宝B', gender: '女', status: 'abnormal', outside: false }]
-  },
-  {
-    id: 'NC-DEMO-003', store: '6', mode: '0', floor: '5', room: 'A501', customerName: '演示客户03',
-    status: 'danger', careLevel: '519', careLevelLabel: '一级护理', careType: '一对一护理', careColor: '#dc7683',
-    delivery: '小产', sameRoom: true, pendingCare: true, motherOut: true, appointmentCount: 102,
-    babies: [{ id: 'BABY-DEMO-003', name: '演示宝宝C', gender: '男', status: 'danger', outside: true }]
-  },
-  {
-    id: 'NC-DEMO-004', store: '6', mode: '1', floor: '8', room: '到家01', customerName: '演示客户04',
-    status: 'normal', careLevel: '520', careLevelLabel: '二级护理', careType: '一对多护理', careColor: '#9a80d8',
-    delivery: '顺产', sameRoom: true, pendingCare: false, motherOut: false, appointmentCount: 1,
-    babies: [{ id: 'BABY-DEMO-004', name: '演示宝宝D', gender: '女', status: 'normal', outside: false }]
-  },
-  {
-    id: 'NC-DEMO-005', store: '21', mode: '0', floor: '2', room: 'B201', customerName: '演示客户05',
-    status: 'normal', careLevel: '519', careLevelLabel: '一级护理', careType: '一对一护理', careColor: '#6da7dc',
-    delivery: '顺产', sameRoom: true, pendingCare: true, motherOut: false, appointmentCount: 2,
-    babies: [
-      { id: 'BABY-DEMO-005', name: '演示宝宝E', gender: '女', status: 'normal', outside: false },
-      { id: 'BABY-DEMO-006', name: '演示宝宝F', gender: '男', status: 'normal', outside: false }
-    ]
-  },
-  {
-    id: 'NC-DEMO-006', store: '21', mode: '0', floor: '3', room: 'B301', customerName: '演示客户06',
-    status: 'abnormal', careLevel: '520', careLevelLabel: '二级护理', careType: '一对多护理', careColor: '#9a80d8',
-    delivery: '剖腹产', sameRoom: false, pendingCare: false, motherOut: false, appointmentCount: 0,
-    babies: [{ id: 'BABY-DEMO-007', name: '演示宝宝G', gender: '男', status: 'abnormal', outside: false }]
-  },
-  {
-    id: 'NC-DEMO-007', store: '21', mode: '1', floor: '8', room: '到家02', customerName: '演示客户07',
-    status: 'normal', careLevel: '519', careLevelLabel: '一级护理', careType: '一对一护理', careColor: '#6da7dc',
-    delivery: '顺产', sameRoom: true, pendingCare: false, motherOut: false, appointmentCount: 1,
-    babies: [{ id: 'BABY-DEMO-008', name: '演示宝宝H', gender: '女', status: 'normal', outside: false }]
-  }
-]
 
 export default {
   name: 'NursingCenter',
@@ -313,25 +276,12 @@ export default {
       stayModes: [{ value: '0', label: '会所' }, { value: '1', label: '到家' }],
       cardActions: CARD_ACTIONS,
       filters: {
-        store: '6',
+        store: routeStoreValue(this.$route, this.$store.getters.currentStoreId),
         careLevel: '-1',
         mode: '0',
         statuses: []
       },
-      clients: DEMO_CLIENTS.map(item => ({
-        ...item,
-        checkInAt: '2026-07-18 10:00',
-        stayDays: 6,
-        checkOutAt: '2026-08-15 10:00',
-        customerRemark: '脱敏演示客户备注',
-        riskAssessment: item.status === 'normal' ? '正常' : item.status === 'abnormal' ? '异常' : '危险',
-        careNotice: '按护理计划执行并记录（演示）',
-        babies: item.babies.map((baby, babyIndex) => ({
-          ...baby,
-          birthDate: `2026-07-${String(18 + babyIndex).padStart(2, '0')}`,
-          ageDays: 6 - babyIndex
-        }))
-      })),
+      clients: [],
       collapsedFloors: {},
       careRecordVisible: false,
       careRecordType: 'mother',
@@ -344,6 +294,10 @@ export default {
     }
   },
   computed: {
+    ...mapGetters(['currentStoreId']),
+    isAllStores() {
+      return String(this.currentStoreId || 'all') === 'all'
+    },
     storeClients() {
       return this.clients.filter(client => client.store === this.filters.store)
     },
@@ -371,8 +325,12 @@ export default {
       const clients = this.storeClients
       const babies = clients.reduce((result, client) => result.concat(client.babies), [])
       const allPeopleStatuses = clients.map(client => client.status).concat(babies.map(baby => baby.status))
-      const totalServices = this.filters.store === '6' ? 36 : 24
-      const pendingServices = this.filters.store === '6' ? 11 : 7
+      const totalServices = clients.reduce((sum, client) => (
+        sum + Number(client.pendingServices || 0) + Number(client.completedServices || 0)
+      ), 0)
+      const pendingServices = clients.reduce((sum, client) => (
+        sum + Number(client.pendingServices || 0)
+      ), 0)
       return [
         { key: 'people', label: '在住总人数', value: clients.length + babies.length },
         { key: 'mothers', label: '妈妈人数', value: clients.length },
@@ -396,12 +354,45 @@ export default {
         { key: 'many', label: '一对多护理', value: clients.filter(client => client.careType === '一对多护理').length },
         { key: 'blank', blank: true, label: '', value: '' }
       ]
-    },
-    activeActionPath() {
-      return ACTION_PATHS[this.activeAction] || '—'
     }
   },
+  watch: {
+    '$route.query': {
+      deep: true,
+      handler(routeQuery) {
+        const store = routeStoreValue(
+          { query: routeQuery },
+          this.$store.getters.currentStoreId
+        )
+        if (store !== this.filters.store) {
+          this.filters.store = store
+          this.loadClients()
+        }
+      }
+    },
+    currentStoreId(value, previous) {
+      if (String(value) === String(previous) || String(value || 'all') === 'all') return
+      const store = routeStoreValue(this.$route, value)
+      if (store !== this.filters.store) {
+        this.filters.store = store
+        this.loadClients()
+      }
+    }
+  },
+  mounted() {
+    this.loadClients()
+  },
   methods: {
+    handleStoreChange(store) {
+      const storeId = ROUTE_ID_BY_STORE_VALUE[Number(store)]
+      if (!storeId || String(this.$route.query.storeId || '') === storeId) return
+      this.$router.replace({
+        query: {
+          ...this.$route.query,
+          storeId
+        }
+      })
+    },
     isFloorCollapsed(floor) {
       return Boolean(this.collapsedFloors[floor])
     },
@@ -409,8 +400,7 @@ export default {
       this.$set(this.collapsedFloors, floor, !this.isFloorCollapsed(floor))
     },
     toggleSameRoom(client) {
-      this.$set(client, 'sameRoom', !client.sameRoom)
-      this.$message.success(`母婴同室已切换为${client.sameRoom ? '开启' : '关闭'}（演示）`)
+      this.$message.warning('母婴同室状态尚未接入正式写入，请在入住交接中记录')
     },
     openCareRecord(type, client, baby = {}) {
       this.activeClient = client
@@ -440,6 +430,73 @@ export default {
       this.activeAction = metric.action
       this.legacyActionVisible = false
       this.actionDialogVisible = true
+    },
+    async loadClients() {
+      try {
+        const response = await getNursingModuleData('nursing-center', {
+          storeId: this.filters.store
+        })
+        const rows = response.data && Array.isArray(response.data.list)
+          ? response.data.list
+          : []
+        this.clients = rows.map(row => ({
+          ...row,
+          store: String(row.storeId),
+          mode: '0',
+          floor: String(row.floor || '未分层'),
+          room: row.room || '未分房',
+          status: 'unassessed',
+          careLevel: '-1',
+          careLevelLabel: row.careLevel || '未设置',
+          careType: row.careType || '未设置',
+          careColor: '#8793a3',
+          delivery: row.deliveryMode || '未记录',
+          sameRoom: null,
+          pendingCare: Number(row.pendingServices || 0) > 0,
+          motherOut: false,
+          appointmentCount: 0,
+          babies: (row.babies || []).map(baby => ({
+            ...baby,
+            status: 'unassessed',
+            outside: false
+          }))
+        }))
+      } catch (error) {
+        this.clients = []
+      }
+    },
+    async saveCareRecord({ recordType, form }) {
+      if (this.isAllStores) return this.$message.warning('全部门店仅支持汇总查询，请先在顶栏选择具体门店')
+      const resource = recordType === 'baby'
+        ? 'baby-nursing-records'
+        : 'mother-nursing-records'
+      try {
+        await saveNursingModuleRecord(resource, {
+          ...form,
+          customerName: this.activeClient.customerName,
+          customerId: this.activeClient.id,
+          babyName: this.activeBaby.name,
+          babyId: this.activeBaby.id,
+          storeId: String(this.currentStoreId)
+        })
+        this.$message.success('护理记录已保存')
+      } catch (error) {
+        this.$message.warning(error.message || '护理记录保存失败')
+      }
+    },
+    async saveBaby(form) {
+      if (this.isAllStores) return this.$message.warning('全部门店仅支持汇总查询，请先在顶栏选择具体门店')
+      try {
+        await saveNursingModuleRecord('baby-files', {
+          ...form,
+          customerName: this.activeClient.customerName,
+          customerId: this.activeClient.id,
+          storeId: String(this.currentStoreId)
+        })
+        this.$message.success('宝宝档案已保存')
+      } catch (error) {
+        this.$message.warning(error.message || '宝宝档案保存失败')
+      }
     }
   }
 }
@@ -463,7 +520,6 @@ export default {
 .center-toolbar h2 { margin: 0 12px 0 0; color: #333; font-size: 15px; }
 .store-select { width: 178px; margin-right: 7px; }
 .level-select { width: 150px; }
-.evidence-note { margin-left: auto; color: #a0a8b3; font-size: 12px; }
 .center-layout { display: grid; grid-template-columns: 330px minmax(0, 1fr); min-height: calc(100vh - 174px); }
 .metric-panel {
   display: grid;
@@ -678,7 +734,6 @@ export default {
 }
 @media (max-width: 760px) {
   .center-toolbar { flex-wrap: wrap; gap: 7px; padding: 10px; }
-  .evidence-note { width: 100%; margin-left: 0; }
   .center-layout { display: block; }
   .metric-panel { border-right: 0; }
   .care-status-filter { min-width: 0; flex-wrap: wrap; }

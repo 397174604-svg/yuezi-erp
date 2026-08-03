@@ -1,0 +1,294 @@
+// 开派月子会所 ERP 统一视觉主题
+// 金色只承担品牌与操作高亮；成功、预警、异常等业务状态仍保留语义色。
+:root {
+  --qdf-gold-950: #4a3820;
+  --qdf-gold-900: #6f542b;
+  --qdf-gold-800: #8c6a36;
+  --qdf-gold-700: #a68045;
+  --qdf-gold-600: #b8945a;
+  --qdf-gold-500: #c9aa70;
+  --qdf-gold-300: #e2cfa9;
+  --qdf-gold-200: #ecdec3;
+  --qdf-gold-100: #f6efdf;
+  --qdf-gold-50: #fbf8f1;
+  --qdf-ink-900: #27231e;
+  --qdf-ink-700: #514a40;
+  --qdf-ink-500: #766d60;
+  --qdf-page: #f4f1eb;
+  --qdf-surface: #fffdf9;
+  --qdf-line: #e7dfd2;
+  --qdf-brand-gradient: linear-gradient(135deg, #dcc28f 0%, #b8945a 48%, #80602f 100%);
+  --qdf-brand-gradient-dark: linear-gradient(125deg, #28241e 0%, #5f4b2d 56%, #a68045 100%);
+  --qdf-brand-shadow: 0 14px 34px rgba(74, 55, 26, .2);
+}
+
+body {
+  background: var(--qdf-page);
+}
+
+#app .app-main,
+#app .main-container,
+.app-container {
+  background: var(--qdf-page);
+}
+
+// 通用页面容器：把旧冷灰背景收敛成暖米白。
+[class$="-page"],
+[class*="-page "] {
+  --page-accent: var(--qdf-gold-600);
+}
+
+.el-card,
+.el-dialog,
+.el-drawer,
+.el-popover,
+.el-dropdown-menu,
+.el-select-dropdown {
+  border-color: var(--qdf-line);
+  background: var(--qdf-surface);
+}
+
+.el-card {
+  border-radius: 10px;
+  box-shadow: 0 12px 30px -24px rgba(74, 55, 26, .42);
+}
+
+.el-card__header,
+.el-dialog__header,
+.el-drawer__header {
+  color: var(--qdf-ink-900);
+  border-bottom-color: var(--qdf-line);
+}
+
+.el-dialog {
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 24px 70px rgba(50, 39, 23, .2);
+}
+
+.el-dialog__header {
+  padding: 18px 22px 15px;
+  background: linear-gradient(180deg, #fffdf9 0%, #fbf7ef 100%);
+}
+
+.el-dialog__title {
+  color: var(--qdf-ink-900);
+  font-weight: 700;
+}
+
+.el-button {
+  border-radius: 6px;
+  transition: border-color .18s ease, background-color .18s ease, color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+
+.el-button--primary,
+.el-button--primary:focus {
+  color: #fff;
+  border-color: var(--qdf-gold-600);
+  background: var(--qdf-brand-gradient);
+  box-shadow: 0 7px 16px -10px rgba(111, 84, 43, .75);
+}
+
+.el-button--primary:hover {
+  border-color: var(--qdf-gold-800);
+  background: linear-gradient(135deg, #d2b77f 0%, #a68045 52%, #6f542b 100%);
+  box-shadow: 0 10px 22px -12px rgba(111, 84, 43, .8);
+  transform: translateY(-1px);
+}
+
+.el-button--primary:active {
+  transform: translateY(0);
+}
+
+.el-button--primary.is-plain,
+.el-button--primary.is-plain:focus {
+  color: var(--qdf-gold-800);
+  border-color: var(--qdf-gold-300);
+  background: var(--qdf-gold-50);
+  box-shadow: none;
+}
+
+.el-button--primary.is-plain:hover {
+  color: #fff;
+  border-color: var(--qdf-gold-700);
+  background: var(--qdf-gold-700);
+}
+
+.el-button--text {
+  color: var(--qdf-gold-800);
+}
+
+.el-button--text:hover,
+.el-link.el-link--primary:hover {
+  color: var(--qdf-gold-600);
+}
+
+.el-input__inner,
+.el-textarea__inner,
+.el-select .el-input__inner,
+.el-input-number {
+  border-color: #ddd4c5;
+  background-color: #fffefa;
+}
+
+.el-input__inner:hover,
+.el-textarea__inner:hover,
+.el-select:hover .el-input__inner {
+  border-color: var(--qdf-gold-500);
+}
+
+.el-input__inner:focus,
+.el-textarea__inner:focus,
+.el-select .el-input.is-focus .el-input__inner,
+.el-input-number.is-controls-right .el-input__inner:focus {
+  border-color: var(--qdf-gold-600);
+  box-shadow: 0 0 0 2px rgba(184, 148, 90, .1);
+}
+
+.el-checkbox__input.is-checked + .el-checkbox__label,
+.el-radio__input.is-checked + .el-radio__label {
+  color: var(--qdf-gold-800);
+}
+
+.el-checkbox__input.is-focus .el-checkbox__inner,
+.el-radio__input.is-checked .el-radio__inner,
+.el-switch.is-checked .el-switch__core {
+  border-color: var(--qdf-gold-600);
+}
+
+.el-checkbox__input.is-checked .el-checkbox__inner,
+.el-checkbox__input.is-indeterminate .el-checkbox__inner,
+.el-radio__input.is-checked .el-radio__inner,
+.el-switch.is-checked .el-switch__core {
+  background-color: var(--qdf-gold-600);
+}
+
+.el-tabs__nav-wrap::after {
+  background-color: var(--qdf-line);
+}
+
+.el-tabs__active-bar {
+  height: 3px;
+  border-radius: 3px;
+  background-color: var(--qdf-gold-600);
+}
+
+.el-tabs__item.is-active,
+.el-tabs__item:hover,
+.el-dropdown-menu__item:focus,
+.el-dropdown-menu__item:not(.is-disabled):hover,
+.el-select-dropdown__item.selected {
+  color: var(--qdf-gold-800);
+}
+
+.el-dropdown-menu__item:focus,
+.el-dropdown-menu__item:not(.is-disabled):hover,
+.el-select-dropdown__item.hover,
+.el-select-dropdown__item:hover {
+  background: var(--qdf-gold-50);
+}
+
+.el-table {
+  color: var(--qdf-ink-700);
+}
+
+#app .el-table th {
+  color: #62594c;
+  background: #f3eadb !important;
+}
+
+.el-table td,
+.el-table th.is-leaf {
+  border-bottom-color: var(--qdf-line);
+}
+
+.el-table--border,
+.el-table--group {
+  border-color: var(--qdf-line);
+}
+
+.el-table__body tr.current-row > td,
+.el-table__body tr:hover > td {
+  background-color: #fbf5e9 !important;
+}
+
+.el-pagination.is-background .el-pager li:not(.disabled).active,
+.el-pagination.is-background .el-pager li:not(.disabled):hover {
+  color: #fff;
+  background: var(--qdf-gold-600);
+}
+
+.el-pagination button:hover,
+.el-pagination .el-pager li:hover {
+  color: var(--qdf-gold-800);
+}
+
+.el-loading-spinner .path {
+  stroke: var(--qdf-gold-600);
+}
+
+.el-progress-bar__inner {
+  background: var(--qdf-brand-gradient);
+}
+
+.el-breadcrumb__inner a:hover,
+.el-breadcrumb__inner.is-link:hover,
+.el-tree-node__content:hover,
+.el-tree--highlight-current .el-tree-node.is-current > .el-tree-node__content {
+  color: var(--qdf-gold-800);
+  background: var(--qdf-gold-50);
+}
+
+.el-tag:not(.el-tag--success):not(.el-tag--warning):not(.el-tag--danger):not(.el-tag--info) {
+  color: var(--qdf-gold-800);
+  border-color: var(--qdf-gold-300);
+  background: var(--qdf-gold-50);
+}
+
+.el-message-box {
+  border-color: var(--qdf-line);
+  border-radius: 12px;
+}
+
+// 旧通用页面组件的品牌高亮统一，业务状态色不受影响。
+.page-heading .eyebrow,
+.page-heading > div > .eyebrow,
+.page-heading + .eyebrow {
+  color: var(--qdf-gold-800);
+}
+
+.metric-card,
+.summary-card,
+.stat-card,
+.filter-card,
+.table-card {
+  border-color: var(--qdf-line);
+}
+
+.sub-navbar {
+  background: var(--qdf-brand-gradient-dark);
+}
+
+.link-type,
+.link-type:focus,
+.link-type:hover {
+  color: var(--qdf-gold-800);
+}
+
+.filter-container {
+  border-color: var(--qdf-line);
+}
+
+// 统一滚动条的低干扰暖灰色，避免大表格出现突兀的系统蓝灰。
+* {
+  scrollbar-color: #b9ac98 #f2ede4;
+}
+
+*::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+  background: #b9ac98;
+}
+
+*::-webkit-scrollbar-track {
+  background: #f2ede4;
+}

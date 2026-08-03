@@ -106,9 +106,15 @@ ACTION_NAMES = {
     "EXECUTE": "执行",
 }
 
+MIGRATION_PERMISSION_CODES = {
+    "SALES.CONTRACT.MEAL_PACKAGE.UPDATE",
+    "SALES.DISCOUNT.CONSUME",
+}
+
 ROLE_DEFINITIONS = [
     ("SYS_ADMIN", "系统管理员", "SYSTEM", True, True, "ALL"),
     ("GENERAL_MANAGER", "总经理", "MANAGEMENT", True, False, "ALL"),
+    ("STORE_MANAGER", "店长", "MANAGEMENT", True, False, "STORE"),
     ("HR_MANAGER", "人事主管", "MANAGEMENT", True, False, "ALL"),
     ("FINANCE_SPECIALIST", "财务专员", "JOB", False, False, "STORE"),
     ("SALES_MANAGER", "销售经理", "MANAGEMENT", True, False, "STORE"),
@@ -135,6 +141,24 @@ ROLE_MODULE_ACTIONS = {
     "GENERAL_MANAGER": {
         module: {"VIEW", "QUERY", "APPROVE", "EXPORT", "PRINT"}
         for module in MODULE_NAMES
+    },
+    "STORE_MANAGER": {
+        "CUSTOMER": {"VIEW", "QUERY", "CREATE", "UPDATE"},
+        "SALES": {"VIEW", "QUERY", "APPROVE", "EXPORT", "PRINT"},
+        "FINANCE": {"VIEW", "QUERY", "EXPORT", "PRINT"},
+        "ROOM": {
+            "VIEW",
+            "QUERY",
+            "CREATE",
+            "UPDATE",
+            "ALLOCATE",
+            "EXECUTE",
+            "PRINT",
+        },
+        "NURSING": {"VIEW", "QUERY"},
+        "RECOVERY": {"VIEW", "QUERY"},
+        "DIET": {"VIEW", "QUERY"},
+        "REPORT": {"VIEW", "QUERY", "EXPORT"},
     },
     "HR_MANAGER": {
         "BASIC": {"VIEW", "QUERY", "CREATE", "UPDATE", "EXPORT"},
@@ -166,8 +190,8 @@ ROLE_MODULE_ACTIONS = {
     "SALES_CONSULTANT": {
         "CUSTOMER": {"VIEW", "QUERY", "CREATE", "UPDATE"},
         "SALES": {"VIEW", "QUERY", "CREATE", "UPDATE", "PRINT"},
-        "FINANCE": {"VIEW", "QUERY", "CREATE", "PRINT"},
-        "ROOM": {"VIEW", "QUERY", "CREATE"},
+        "FINANCE": {"VIEW", "QUERY", "PRINT"},
+        "ROOM": {"VIEW", "QUERY"},
     },
     "NURSING_DIRECTOR": {
         "NURSING": {"VIEW", "QUERY", "CREATE", "UPDATE", "APPROVE", "ALLOCATE", "EXPORT", "PRINT", "EXECUTE"},
@@ -317,7 +341,10 @@ def migration_version(path):
 
 
 def migration_checksum(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    normalized_sql = (
+        path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    )
+    return hashlib.sha256(normalized_sql).hexdigest()
 
 
 def export_schema(database, output_path):
@@ -1288,6 +1315,117 @@ def reset_and_import(database, employee_path, offboarded_path):
     return report
 
 
+def bootstrap_minimal(database):
+    """Initialize a fresh schema without private employee roster data.
+
+    Fresh databases need tenant/store rows before V010, while normalized RBAC
+    tables do not exist until V001. Apply the migration chain in two phases and
+    seed the non-sensitive baseline between them.
+    """
+    if database != EXPECTED_DATABASE:
+        raise ValueError(
+            "Minimal bootstrap is restricted to the yuezi database."
+        )
+    connection = connect(database)
+    try:
+        existing_tables = set(list_base_tables(connection, database))
+        required_base = {"tenants", "stores", "roles", "staff"}
+        missing_base = sorted(required_base - existing_tables)
+        if missing_base:
+            raise RuntimeError(
+                "Import the reference schema before bootstrap-minimal; "
+                "missing tables: " + ", ".join(missing_base)
+            )
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM tenants")
+            tenant_count = int(cursor.fetchone()[0])
+            migration_count = 0
+            if table_exists(connection, database, "schema_migrations"):
+                cursor.execute("SELECT COUNT(*) FROM schema_migrations")
+                migration_count = int(cursor.fetchone()[0])
+        if tenant_count or migration_count:
+            raise RuntimeError(
+                "bootstrap-minimal requires a fresh imported schema with no "
+                f"tenant or migration rows; tenants={tenant_count}, "
+                f"migrations={migration_count}."
+            )
+
+        with connection.cursor() as cursor:
+            seed_tenant_and_stores(cursor)
+        connection.commit()
+
+        paths = migration_paths()
+        baseline_paths = [
+            path for path in paths if int(migration_version(path).rsplit("_", 1)[1]) <= 3
+        ]
+        runtime_paths = [
+            path for path in paths if int(migration_version(path).rsplit("_", 1)[1]) > 3
+        ]
+        applied = []
+        for path in baseline_paths:
+            if apply_migration(connection, database, path):
+                applied.append(migration_version(path))
+
+        with connection.cursor() as cursor:
+            rbac = seed_rbac(cursor)
+        connection.commit()
+
+        for path in runtime_paths:
+            if apply_migration(connection, database, path):
+                applied.append(migration_version(path))
+        verify_migration_surface(connection, database)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM tenants")
+            tenants = int(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*) FROM stores")
+            stores = int(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*) FROM roles")
+            roles = int(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*) FROM permissions")
+            permissions = int(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*) FROM schema_migrations")
+            migrations = int(cursor.fetchone()[0])
+        expected = {
+            "tenants": 1,
+            "stores": 2,
+            "roles": len(ROLE_DEFINITIONS),
+            "permissions": (
+                len(MODULE_NAMES) * len(ACTION_NAMES)
+                + len(MIGRATION_PERMISSION_CODES)
+            ),
+            "migrations": len(paths),
+        }
+        actual = {
+            "tenants": tenants,
+            "stores": stores,
+            "roles": roles,
+            "permissions": permissions,
+            "migrations": migrations,
+        }
+        mismatches = {
+            key: {"expected": value, "actual": actual[key]}
+            for key, value in expected.items()
+            if actual[key] != value
+        }
+        if mismatches:
+            raise RuntimeError(
+                "Minimal bootstrap verification failed: "
+                + json.dumps(mismatches, ensure_ascii=False)
+            )
+        return {
+            "database": database,
+            "mode": "minimal-no-private-roster",
+            "migrations_applied": applied,
+            "rbac": rbac,
+            "verification": actual,
+        }
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
 def dry_run(employee_path, offboarded_path):
     rows = load_employee_rows(employee_path)
     offboarded_rows = load_roster_rows(offboarded_path)
@@ -1333,6 +1471,7 @@ def main():
         choices=(
             "dry-run",
             "backup-schema",
+            "bootstrap-minimal",
             "inspect-staff-fks",
             "validate-migration",
             "reset-import",
@@ -1355,6 +1494,8 @@ def main():
             "tables": export_schema(args.database, args.backup_output),
             "output": str(args.backup_output),
         }
+    elif args.command == "bootstrap-minimal":
+        result = bootstrap_minimal(args.database)
     elif args.command == "inspect-staff-fks":
         result = inspect_staff_foreign_keys(args.database)
     elif args.command == "validate-migration":

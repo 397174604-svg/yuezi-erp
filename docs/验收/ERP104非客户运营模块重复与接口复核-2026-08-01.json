@@ -1,0 +1,49 @@
+{
+  "auditDate": "2026-08-01",
+  "auditMode": "static-audit-and-post-fix-recheck",
+  "sourceOfTruth": "src/config/erp-feature-registry.js (104 unique feature IDs)",
+  "scope": ["订单财务", "预约房态", "销售合同", "门店资产"],
+  "protected": [
+    {"featureId":"F018","name":"客房房态","classification":"冻结保护","note":"仅标识保护状态；未读取页面、接口或数据。"},
+    {"featureId":"F019","name":"智能排房","classification":"冻结保护","note":"仅标识保护状态；未读取页面、接口或数据。"}
+  ],
+  "findings": [
+    {"featureId":"F007","name":"收银开单与订单","classification":"合理复用","routeComponent":"finance-workbench","interface":"/erp/finance/modules/receipt-create","risk":"需接口冒烟","owner":"财务与审批"},
+    {"featureId":"F009","name":"财务收支","classification":"合理复用","routeComponent":"finance-workbench","interface":"/erp/finance/modules/receipts","risk":"需接口冒烟","owner":"财务与审批"},
+    {"featureId":"F010","name":"审批中台","classification":"已修复","routeComponent":"approval-workbench","interface":"独立审批配置与工作台；缺少外部资源时显示待接入","risk":"不再回退收款页；仍需后续接入真实审批资源","owner":"财务与审批"},
+    {"featureId":"F011","name":"退款与报销","classification":"合理复用","routeComponent":"finance-workbench","interface":"refund-applications/refund-audits","risk":"报销子能力未在当前配置中单独核实","owner":"财务与审批"},
+    {"featureId":"F012","name":"收支分析","classification":"接口缺口","routeComponent":"finance-workbench","interface":"无独立配置键，回退至收款管理","risk":"高：不应将经营分析伪装成收款列表","owner":"财务与审批"},
+    {"featureId":"F013","name":"发票管理","classification":"合理复用","routeComponent":"finance-workbench","interface":"/erp/finance/modules/invoices","risk":"外部税控未接入时仅允许档案登记","owner":"财务与审批"},
+    {"featureId":"F014","name":"交易对账","classification":"合理复用","routeComponent":"finance-workbench","interface":"/erp/finance/modules/reconciliations","risk":"外部支付流水须人工登记/对账，不得伪造直连成功","owner":"财务与审批"},
+    {"featureId":"F015","name":"成本核算","classification":"接口缺口","routeComponent":"finance-workbench","interface":"无独立配置键，回退至收款管理","risk":"高：成本口径未形成页面与接口闭环","owner":"财务与审批"},
+    {"featureId":"F016","name":"充值报表","classification":"接口缺口","routeComponent":"finance-workbench","interface":"无独立配置键，回退至收款管理","risk":"高：报表能力不能以收款列表替代","owner":"财务与审批"},
+    {"featureId":"F080","name":"厂商并行期对账帮手","classification":"接口缺口","routeComponent":"finance-workbench","interface":"无独立配置键，回退至收款管理","risk":"中：需要明确为人工对账待办或独立资源","owner":"财务与审批"},
+    {"featureId":"F083","name":"在线支付（微信/支付宝）","classification":"接口缺口","routeComponent":"finance-workbench","interface":"仅发现收款/对账接口；未发现支付渠道适配闭环","risk":"高：只能申请、待执行、失败重试，不可显示已支付","owner":"财务与审批"},
+    {"featureId":"F017","name":"预约与排班","classification":"已修复","routeComponent":"schedule-workbench","interface":"独立预约与排班配置，使用预约/技师排班领域资源","risk":"不再导向客房壳；需继续做多角色接口验收","owner":"预约与排班"},
+    {"featureId":"F086","name":"在线预约看板（技师/时段/多渠道）","classification":"已修复","routeComponent":"schedule-workbench","interface":"与 F017 共用预约领域服务并保留独立功能语义","risk":"不再导向客房壳；需继续做多角色接口验收","owner":"预约与排班"},
+    {"featureId":"F020","name":"合同与销售","classification":"合理复用","routeComponent":"sales-workbench","interface":"/erp/sales/modules/contracts","risk":"需主链冒烟：保存、审批、收款、订房联动","owner":"销售合同"},
+    {"featureId":"F050","name":"套餐管理","classification":"合理复用","routeComponent":"sales-workbench","interface":"/erp/sales/modules/packages","risk":"中心店无套餐主数据时不得阻塞合同/排房","owner":"销售合同"},
+    {"featureId":"F107","name":"电子合同（在线签署/模板管理）","classification":"接口缺口","routeComponent":"sales-workbench","interface":"无电子签署专属资源；销售配置回退合同管理","risk":"高：仅可形成合同申请、签署待接入与失败记录","owner":"销售合同"},
+    {"featureId":"F058","name":"门店与渠道（含转店）","classification":"接口缺口","routeComponent":"store-workbench","interface":"页面 createRows/saveRecord 为内存数组，未发现 API 调用","risk":"高：刷新即丢失，不能验收为已保存","owner":"门店资产"},
+    {"featureId":"F061","name":"系统设置","classification":"接口缺口","routeComponent":"system-workbench","interface":"页面 createRows/saveRecord 为内存数组；虽存在 /erp/system/modules 只读分发，未接入该页面写入","risk":"高：配置修改未持久化/未审计","owner":"平台与系统设置"},
+    {"featureId":"F079","name":"历史数据迁移工具","classification":"接口缺口","routeComponent":"system-workbench","interface":"迁移批次为内存示例；未发现预检/导入/回滚实际接口","risk":"高：不得展示虚假导入成功","owner":"平台与系统设置"},
+    {"featureId":"F093","name":"连锁多门店管理（资金归集/会员共享）","classification":"接口缺口","routeComponent":"store-workbench","interface":"页面 createRows/saveRecord 为内存数组","risk":"高：归集规则与跨店边界必须持久化并留痕","owner":"门店资产"},
+    {"featureId":"F098","name":"品牌定制（Logo/主题色/专属域名）","classification":"接口缺口","routeComponent":"system-workbench","interface":"品牌版本为内存示例；未发现发布/回滚接口","risk":"中：应限制为草稿与待接入，不能假称已发布","owner":"平台与系统设置"}
+  ],
+  "summary": {
+    "protected": 2,
+    "reasonableReuse": 7,
+    "duplicateOrRouteMismatch": 0,
+    "fixedDuplicateOrRouteMismatch": 3,
+    "interfaceGaps": 11,
+    "nextGate": "继续补齐 F012/F015/F016/F058/F061/F079/F083/F093/F098/F107 的真实资源或明确待接入状态，再进行逐角色冒烟。"
+  },
+  "evidence": [
+    "src/router/index.js（approval/schedule 已改为独立工作台映射）",
+    "src/views/erp/approval-workbench/index.vue、src/views/erp/schedule-workbench/index.vue（专属页面）",
+    "src/config/finance-pages.js:388-390（未知标题回退收款管理）",
+    "src/views/erp/store-workbench/index.vue:101-113（内存 createRows/saveRecord）",
+    "src/views/erp/system-workbench/index.vue:91-105（内存 createRows/saveRecord）",
+    "server/mvp_api.py:1360-1444,1471-1480,1598-1610（系统、财务、销售接口分发）"
+  ]
+}

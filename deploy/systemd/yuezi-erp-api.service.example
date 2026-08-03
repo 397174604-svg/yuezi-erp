@@ -1,0 +1,22 @@
+[Unit]
+Description=Qide Fenfang Yuezi ERP API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yuezi-erp
+Group=yuezi-erp
+WorkingDirectory=/srv/yuezi-erp/current
+EnvironmentFile=/etc/yuezi-erp/api.env
+ExecStart=/srv/yuezi-erp/venv/bin/python server/mvp_api.py serve
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/yuezi-erp
+
+[Install]
+WantedBy=multi-user.target

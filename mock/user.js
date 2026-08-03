@@ -10,7 +10,7 @@ const tokens = {
 
 const users = {
   'admin-token': {
-    roles: ['admin'],
+    roles: ['admin', 'SYS_ADMIN'],
     introduction: '奇德芬芳月子会所系统管理员',
     avatar: '',
     name: 'admin'

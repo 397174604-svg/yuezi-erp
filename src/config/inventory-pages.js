@@ -11,6 +11,8 @@ const dateRange = (key, label) => ({ key, label, type: 'dateRange', verified: fa
 const number = (key, label, required = false) => ({ key, label, type: 'number', required, verified: false })
 const textarea = (key, label) => ({ key, label, type: 'textarea', verified: false })
 const upload = (key, label) => ({ key, label, type: 'upload', verified: false })
+const materialSelect = (required = false) => ({ key: 'materialName', label: '物料名称', type: 'material-select', required, verified: false })
+const supplierSelect = (required = false) => ({ key: 'supplier', label: '供应商', type: 'supplier-select', required, verified: false })
 const col = (key, label, width, tag = false, money = false) => ({ key, label, width, tag, money, verified: false })
 
 const auditStatuses = ['待提交', '待审核', '审核通过', '审核不通过']
@@ -30,7 +32,7 @@ const commonMeta = {
 
 const withMeta = config => ({ ...commonMeta, ...config })
 const warehouseFilter = select('warehouse', '仓库', warehouses)
-const storeFilter = select('store', '门店', stores)
+const storeFilter = { ...select('store', '门店', stores), required: true }
 const materialColumns = [
   col('materialCode', '物料编号', 130),
   col('materialName', '物料名称', 160),
@@ -61,7 +63,7 @@ export const inventoryPageConfigs = {
     actions: ['添加', '编辑', '删除', '提交', '审核', '反审核', '到货登记', '打印'],
     filters: [input('orderNo', '采购单号'), input('supplier', '供应商'), storeFilter, select('auditStatus', '审核状态', auditStatuses), select('arrivalStatus', '到货状态', stockStatuses), dateRange('orderRange', '采购日期')],
     columns: [col('orderNo', '采购单号', 155), col('orderDate', '采购日期', 110), col('supplier', '供应商', 160), col('store', '采购门店', 150), col('warehouse', '入库仓库', 135), col('materialCount', '物料种类', 95), col('totalQuantity', '采购数量', 100), col('totalAmount', '采购金额', 110, false, true), col('arrivalStatus', '到货状态', 105, true), col('paymentStatus', '付款状态', 105, true), col('auditStatus', '审核状态', 105, true), col('buyer', '采购员', 100), col('createdAt', '制单时间', 150)],
-    formFields: [date('orderDate', '采购日期'), input('supplier', '供应商'), storeFilter, select('warehouse', '入库仓库', warehouses), input('buyer', '采购员'), input('materialName', '物料名称'), number('quantity', '采购数量', true), number('unitPrice', '采购单价', true), date('expectedArrivalDate', '预计到货日期'), textarea('remark', '备注'), upload('attachment', '附件')]
+    formFields: [date('orderDate', '采购日期'), supplierSelect(true), storeFilter, select('warehouse', '入库仓库', warehouses), input('buyer', '采购员'), materialSelect(true), number('quantity', '采购数量', true), number('unitPrice', '采购单价', true), date('expectedArrivalDate', '预计到货日期'), textarea('remark', '备注'), upload('attachment', '附件')]
   }),
   采购单审核: withMeta({
     key: 'purchase-order-audits',
@@ -127,9 +129,9 @@ export const inventoryPageConfigs = {
     icon: 'el-icon-sort',
     description: '预置仓库之间的库存调拨与收货确认。',
     actions: ['添加', '编辑', '删除', '审核', '反审核', '调出确认', '调入确认', '打印'],
-    filters: [input('transferNo', '调拨单号'), select('sourceWarehouse', '调出仓库', warehouses), select('targetWarehouse', '调入仓库', warehouses), select('transferStatus', '调拨状态', stockStatuses), dateRange('transferRange', '调拨日期')],
+    filters: [input('transferNo', '调拨单号'), select('sourceStore', '调出门店', stores), select('targetStore', '调入门店', stores), select('sourceWarehouse', '调出仓库', warehouses), select('targetWarehouse', '调入仓库', warehouses), select('transferStatus', '调拨状态', stockStatuses), dateRange('transferRange', '调拨日期')],
     columns: [col('transferNo', '调拨单号', 155), col('transferDate', '调拨日期', 110), col('sourceWarehouse', '调出仓库', 135), col('targetWarehouse', '调入仓库', 135), ...materialColumns, col('transferStatus', '调拨状态', 105, true), col('auditStatus', '审核状态', 105, true), col('operator', '经办人', 100), col('remark', '调拨原因', 180)],
-    formFields: [date('transferDate', '调拨日期'), select('sourceWarehouse', '调出仓库', warehouses), select('targetWarehouse', '调入仓库', warehouses), input('materialName', '物料名称'), number('quantity', '调拨数量', true), input('operator', '经办人'), textarea('transferReason', '调拨原因')]
+    formFields: [date('transferDate', '调拨日期'), select('sourceStore', '调出门店', stores), select('targetStore', '调入门店', stores), select('sourceWarehouse', '调出仓库', warehouses), select('targetWarehouse', '调入仓库', warehouses), input('materialName', '物料名称'), number('quantity', '调拨数量', true), input('operator', '经办人'), textarea('transferReason', '调拨原因')]
   }),
   退货管理: withMeta({
     key: 'purchase-returns',
@@ -279,6 +281,136 @@ export const inventoryPageConfigs = {
 applyOriginalEvidence('warehouse', inventoryPageConfigs)
 applyAuditedSurfaceEvidence('warehouse', inventoryPageConfigs)
 
+const integratedAlias = (baseTitle, overrides) => ({
+  ...inventoryPageConfigs[baseTitle],
+  evidenceLevel: '业务数据闭环',
+  completionLevel: '已启用',
+  evidenceNote: '查询由后端强制门店范围；新增、编辑和状态操作写入门店隔离的业务记录及审计事件。',
+  ...overrides
+})
+
+inventoryPageConfigs.库房管理 = integratedAlias('仓库库存查询', {
+  key: 'warehouse-stock-query',
+  description: '按当前门店查看物料现存量、可用量、平均成本、库存金额和最近效期。'
+})
+inventoryPageConfigs.跨店调拨 = integratedAlias('调拨管理', {
+  key: 'stock-transfers',
+  description: '登记中心店与黄河路之间的调拨申请并跟踪调出、收货状态。',
+  formFields: [
+    date('transferDate', '调拨日期'),
+    storeFilter,
+    select('sourceWarehouse', '调出门店', stores),
+    select('targetWarehouse', '调入门店', stores),
+    input('materialName', '物料名称'),
+    number('quantity', '调拨数量', true),
+    input('operator', '经办人'),
+    textarea('transferReason', '调拨原因')
+  ]
+})
+inventoryPageConfigs.库存盘点 = integratedAlias('盘点管理(NEW)', {
+  key: 'stocktakes',
+  description: '登记账面数、实盘数、差异并完成盘点审核状态流转。',
+  formFields: [storeFilter, ...inventoryPageConfigs['盘点管理(NEW)'].formFields]
+})
+inventoryPageConfigs.库存预警 = integratedAlias('物料库存预警', {
+  key: 'stock-warnings',
+  description: '按安全库存和批次效期生成当前门店的缺货、临期与过期提示。',
+  formFields: [storeFilter, ...inventoryPageConfigs.物料库存预警.formFields]
+})
+inventoryPageConfigs.采购管理 = integratedAlias('采购订单', {
+  key: 'purchase-orders',
+  description: '按门店登记采购物料、供应商、数量、单价并跟踪审核与到货。'
+})
+inventoryPageConfigs.库存估值 = integratedAlias('收发存汇总统计', {
+  key: 'stock-summary-report',
+  description: '按移动平均成本计算当前门店库存数量与库存金额。'
+})
+inventoryPageConfigs['批次保质期（效期预警）'] = {
+  ...integratedAlias('仓库库存查询', {
+    key: 'batch-expiry',
+    icon: 'el-icon-timer',
+    description: '按物料批次查看生产日期、有效期、剩余数量和临期状态。'
+  }),
+  filters: [
+    storeFilter,
+    input('materialName', '物料名称'),
+    input('batchNo', '批次号'),
+    select('expiryStatus', '效期状态', ['有效', '临期', '已过期'])
+  ],
+  columns: [
+    col('batchNo', '批次号', 135),
+    col('store', '门店', 150),
+    col('materialCode', '物料编号', 120),
+    col('materialName', '物料名称', 160),
+    col('unit', '单位', 75),
+    col('currentQuantity', '剩余数量', 100),
+    col('productionDate', '生产日期', 110),
+    col('expiryDate', '有效期至', 110),
+    col('expiryStatus', '效期状态', 100, true),
+    col('sourceDocument', '来源单据', 150)
+  ]
+}
+inventoryPageConfigs.供应商管理 = {
+  ...integratedAlias('采购订单', {
+    key: 'supplier-records',
+    icon: 'el-icon-office-building',
+    description: '按门店维护供应商主体、联系人、结算方式和合作状态。'
+  }),
+  actions: ['添加', '编辑', '删除', '启用', '停用', '导出'],
+  filters: [
+    input('supplierName', '供应商名称'),
+    input('contactName', '联系人'),
+    select('cooperationStatus', '合作状态', ['启用', '停用'])
+  ],
+  columns: [
+    col('supplierCode', '供应商编码', 140),
+    col('supplierName', '供应商名称', 180),
+    col('store', '所属门店', 150),
+    col('contactName', '联系人', 110),
+    col('contactPhone', '联系电话', 130),
+    col('settlementMethod', '结算方式', 110),
+    col('cooperationStatus', '合作状态', 100, true),
+    col('updatedAt', '更新时间', 150)
+  ],
+  formFields: [
+    storeFilter,
+    { ...input('supplierName', '供应商名称'), required: true },
+    input('contactName', '联系人'),
+    input('contactPhone', '联系电话'),
+    input('address', '联系地址'),
+    select('settlementMethod', '结算方式', ['现结', '月结', '账期']),
+    select('cooperationStatus', '合作状态', ['启用', '停用']),
+    textarea('remark', '备注')
+  ]
+}
+
+function configureSharedWorkbench(titles, primaryTitle, capabilityId, capabilityName) {
+  const tabs = titles.map(title => ({
+    title,
+    label: title === primaryTitle ? `${title}（${capabilityId}）` : `${title}（兼容入口）`
+  }))
+  titles.forEach(title => {
+    const config = inventoryPageConfigs[title]
+    config.workspace = {
+      primaryTitle,
+      capabilityId,
+      capabilityName,
+      tabs,
+      note: `${capabilityId} ${capabilityName}已收敛为同一工作台；兼容入口与正式入口使用同一门店授权数据和操作流程。`
+    }
+  })
+}
+
+configureSharedWorkbench(['库房管理', '仓库库存查询'], '库房管理', 'F030', '库房管理')
+configureSharedWorkbench(['跨店调拨', '调拨管理'], '跨店调拨', 'F031', '跨店调拨')
+configureSharedWorkbench(['库存盘点', '盘点管理(NEW)'], '库存盘点', 'F032', '库存盘点')
+configureSharedWorkbench(['库存预警', '物料库存预警'], '库存预警', 'F033', '库存预警')
+configureSharedWorkbench(['采购管理', '采购订单'], '采购管理', 'F034', '采购管理')
+
+const inventoryTitleAliases = {
+  批次保质期: '批次保质期（效期预警）'
+}
+
 export function getInventoryPageConfig(title) {
-  return inventoryPageConfigs[title] || inventoryPageConfigs.采购计划
+  return inventoryPageConfigs[inventoryTitleAliases[title] || title] || inventoryPageConfigs.采购计划
 }

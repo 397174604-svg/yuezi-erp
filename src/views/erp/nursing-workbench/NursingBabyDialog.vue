@@ -100,7 +100,6 @@
       </el-row>
     </el-form>
 
-    <p class="demo-note">当前为脱敏演示交互，不会写入真实 ERP 后端。</p>
     <div slot="footer">
       <el-button type="primary" @click="save">保存</el-button>
       <el-button @click="innerVisible = false">关闭</el-button>
@@ -172,7 +171,7 @@ export default {
         this.$message.warning('请填写宝宝姓名')
         return
       }
-      this.$message.success('宝宝信息已保存为脱敏演示记录')
+      this.$emit('saved', { ...this.form })
       this.innerVisible = false
     }
   }

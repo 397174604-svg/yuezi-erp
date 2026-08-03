@@ -8,6 +8,14 @@ export function getInventoryModuleData(resource, params) {
   })
 }
 
+export function getInventoryStoreReferenceOptions(params) {
+  return request({
+    url: '/vue-element-admin/erp/inventory/modules/reference-options',
+    method: 'get',
+    params
+  })
+}
+
 export function saveInventoryModuleRecord(resource, data) {
   return request({
     url: `/vue-element-admin/erp/inventory/modules/${resource}/save`,
@@ -23,4 +31,3 @@ export function performInventoryModuleAction(resource, action, data) {
     data: { action, ...data }
   })
 }
-

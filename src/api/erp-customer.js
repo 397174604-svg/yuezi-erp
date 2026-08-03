@@ -31,11 +31,12 @@ export function createCustomer(data) {
   })
 }
 
-export function getCustomerModuleData(resource, params) {
+export function getCustomerModuleData(resource, params, requestOptions = {}) {
   return request({
     url: `/vue-element-admin/erp/customer/modules/${resource}`,
     method: 'get',
-    params
+    params,
+    ...requestOptions
   })
 }
 

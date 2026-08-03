@@ -1,0 +1,14 @@
+packages:
+  - "."
+
+allowBuilds:
+  core-js: false
+  deasync: false
+  ejs: false
+  highlight.js: false
+  husky: false
+  yorkie: false
+
+overrides:
+  raphael: 2.2.8
+  squire-rte: 1.5.1

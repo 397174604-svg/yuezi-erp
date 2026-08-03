@@ -1,23 +1,26 @@
 import request from '@/utils/request'
 
-export function getMvpOptions() {
+export function getMvpOptions(requestOptions = {}) {
   return request({
     url: '/vue-element-admin/erp/mvp/options',
-    method: 'get'
+    method: 'get',
+    ...requestOptions
   })
 }
 
-export function getMvpOverview() {
+export function getMvpOverview(requestOptions = {}) {
   return request({
     url: '/vue-element-admin/erp/mvp/overview',
-    method: 'get'
+    method: 'get',
+    ...requestOptions
   })
 }
 
-export function getMvpList(resource) {
+export function getMvpList(resource, requestOptions = {}) {
   return request({
     url: `/vue-element-admin/erp/mvp/${resource}`,
-    method: 'get'
+    method: 'get',
+    ...requestOptions
   })
 }
 

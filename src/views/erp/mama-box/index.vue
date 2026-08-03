@@ -71,7 +71,7 @@
             </template>
           </el-table-column>
         </el-table>
-        <div class="table-footer"><span>共 {{ filteredRows.length }} 条演示记录</span><el-pagination background layout="prev, pager, next" :total="filteredRows.length" :page-size="10" /></div>
+        <div class="table-footer"><span>共 {{ filteredRows.length }} 条记录</span><el-pagination background layout="prev, pager, next" :total="filteredRows.length" :page-size="10" /></div>
       </el-card>
     </template>
 
@@ -150,7 +150,7 @@ export default {
         { label: '当前记录', value: this.pageType === 'mama-schedule' ? this.schedule.rows.reduce((sum, row) => sum + row.slots.filter(Boolean).length, 0) : allCount, note: '当前页面', icon: 'el-icon-document', color: '#4f8cf7' },
         { label: '待处理内容', value: pending, note: '问答 / 审核', icon: 'el-icon-bell', color: '#f5ba35' },
         { label: '在售商品项目', value: this.products.filter(item => item.status === '已上架').length + this.projects.filter(item => item.status === '已上架').length, note: '妈妈端可见', icon: 'el-icon-goods', color: '#45b8ac' },
-        { label: '本周课堂报名', value: this.classes.reduce((sum, item) => sum + item.registrations, 0), note: '脱敏演示数据', icon: 'el-icon-date', color: '#ff6f9c' }
+        { label: '本周课堂报名', value: this.classes.reduce((sum, item) => sum + item.registrations, 0), note: '当前统计', icon: 'el-icon-date', color: '#B8945A' }
       ]
     },
     categoryTree() { return [{ id: 'root-1', label: '商城商品', children: this.categories.filter(item => item.parent === '商城商品').map(item => ({ id: item.id, label: `${item.name}（${item.products}）` })) }, { id: 'root-2', label: '服务项目', children: this.categories.filter(item => item.parent === '服务项目').map(item => ({ id: item.id, label: `${item.name}（${item.products}）` })) }] },
@@ -194,7 +194,7 @@ export default {
       if (action === 'stock') row.stockStatus = '已出库'
       if (action === 'cancel') row.status = '已取消'
       await updateMamaBoxStatus(this.pageConfig.resource, row.id, action)
-      this.$message.success('状态已更新并同步妈妈端（模拟接口）')
+      this.$message.success('状态已更新，客户终端同步结果待确认')
     },
     async saveRecord() {
       this.saving = true
@@ -202,7 +202,7 @@ export default {
         await saveMamaBoxRecord(this.pageConfig.resource, this.dialogMode === 'reply' ? { id: this.activeRecord.id, reply: this.form.reply, visibility: this.form.visibility } : this.form)
         if (this.dialogMode === 'reply') this.activeRecord.replyStatus = '已回复'
         this.dialogVisible = false
-        this.$message.success('保存成功并进入妈妈端同步队列（模拟接口）')
+        this.$message.success('保存成功并进入客户终端发布队列')
       } finally { this.saving = false }
     },
     tagType(value) {
@@ -216,11 +216,11 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.mama-box-page { min-height:calc(100vh - 84px); padding:24px; background:#f4f6f9; color:#253247; }.page-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; }.page-heading h1 { margin:5px 0 7px; font-size:25px; }.page-heading p { margin:0; color:#8a96a8; font-size:13px; }.eyebrow { color:#ff6f9c; font-size:12px; font-weight:700; letter-spacing:1px; }.heading-actions { display:flex; align-items:center; gap:8px; }
+.mama-box-page { min-height:calc(100vh - 84px); padding:24px; background:#f4f1eb; color:#253247; }.page-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; }.page-heading h1 { margin:5px 0 7px; font-size:25px; }.page-heading p { margin:0; color:#8a96a8; font-size:13px; }.eyebrow { color:#8c6a36; font-size:12px; font-weight:700; letter-spacing:1px; }.heading-actions { display:flex; align-items:center; gap:8px; }
 .content-card { border:0; border-radius:10px; margin-bottom:16px; box-shadow:0 2px 12px rgba(27,45,75,.055); }.card-title { display:flex; align-items:center; justify-content:space-between; font-weight:700; }.card-title>div { display:flex; gap:8px; }.card-title small { color:#9aa5b4; font-weight:400; }
 .metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; margin-bottom:16px; }.metric-card { display:flex; align-items:center; min-height:96px; padding:18px 20px; background:#fff; border-radius:10px; box-shadow:0 2px 12px rgba(27,45,75,.055); }.metric-card>i { display:grid; place-items:center; width:48px; height:48px; margin-right:14px; border-radius:12px; font-size:22px; }.metric-card div { display:flex; flex-direction:column; }.metric-card b { font-size:25px; }.metric-card span { color:#7d8998; font-size:12px; }.metric-card small { margin-left:auto; color:#a1aab6; align-self:flex-end; }
 .filter-line { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }.filter-line .el-input { width:240px; }.filter-line .el-select { width:165px; }.money { color:#ef6b6b; font-weight:700; }.table-footer { display:flex; justify-content:space-between; align-items:center; padding-top:18px; color:#8b96a6; font-size:12px; }
-.category-tree { min-height:530px; }.schedule-header { display:flex; align-items:center; justify-content:space-between; }.schedule-header>div { display:flex; align-items:center; gap:14px; }.schedule-grid { display:grid; grid-template-columns:95px repeat(7,minmax(105px,1fr)); margin-top:18px; border-top:1px solid #e8edf3; border-left:1px solid #e8edf3; }.schedule-grid>div { min-height:72px; padding:10px; border-right:1px solid #e8edf3; border-bottom:1px solid #e8edf3; }.schedule-corner,.schedule-day,.period-cell { display:grid; place-items:center; color:#65758b; background:#f8fafc; font-weight:700; font-size:12px; }.period-cell { min-height:104px!important; }.schedule-slot { min-height:104px!important; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#c0c7d1; cursor:pointer; }.schedule-slot.occupied { align-items:flex-start; justify-content:flex-start; color:#435268; background:#fff4f8; border-top:3px solid #ff6f9c; }.schedule-slot.occupied span { font-weight:700; line-height:1.5; }.schedule-slot.occupied small { margin-top:10px; color:#ff6f9c; }.schedule-tip { color:#8793a3; font-size:12px; }.schedule-tip i { color:#4f8cf7; }.question-box { padding:14px; margin-bottom:18px; background:#f8fafc; border-radius:8px; }.question-box p { color:#435268; line-height:1.7; }.question-box small { color:#9aa5b4; }
+.category-tree { min-height:530px; }.schedule-header { display:flex; align-items:center; justify-content:space-between; }.schedule-header>div { display:flex; align-items:center; gap:14px; }.schedule-grid { display:grid; grid-template-columns:95px repeat(7,minmax(105px,1fr)); margin-top:18px; border-top:1px solid #e7dfd2; border-left:1px solid #e7dfd2; }.schedule-grid>div { min-height:72px; padding:10px; border-right:1px solid #e7dfd2; border-bottom:1px solid #e7dfd2; }.schedule-corner,.schedule-day,.period-cell { display:grid; place-items:center; color:#65758b; background:#f8f6f1; font-weight:700; font-size:12px; }.period-cell { min-height:104px!important; }.schedule-slot { min-height:104px!important; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#c0c7d1; cursor:pointer; }.schedule-slot.occupied { align-items:flex-start; justify-content:flex-start; color:#435268; background:#fbf7ef; border-top:3px solid #b8945a; }.schedule-slot.occupied span { font-weight:700; line-height:1.5; }.schedule-slot.occupied small { margin-top:10px; color:#8c6a36; }.schedule-tip { color:#8793a3; font-size:12px; }.schedule-tip i { color:#b8945a; }.question-box { padding:14px; margin-bottom:18px; background:#f8f6f1; border-radius:8px; }.question-box p { color:#435268; line-height:1.7; }.question-box small { color:#9aa5b4; }
 @media(max-width:1100px){.metric-grid{grid-template-columns:repeat(2,1fr)}.schedule-card{overflow:auto}.schedule-grid{min-width:950px}}
 @media(max-width:700px){.mama-box-page{padding:14px}.heading-actions{display:none}.metric-grid{grid-template-columns:1fr}.filter-line .el-input,.filter-line .el-select{width:100%}}
 </style>

@@ -153,8 +153,8 @@ function buildSurface(moduleKey, title, page) {
     evidenceLevel: verified ? '工具栏与查询区已核验' : '原页读取异常，保持未知',
     completionLevel: verified ? 'Schema-faithful（工具栏/查询区）' : 'Unknown',
     evidenceNote: verified
-      ? '顶部业务工具栏、主查询字段、下拉选项、默认值与查询区按钮来自原 ERP admin 只读会话；列表技术列、表单、弹窗和真实写入流程仍需独立核验。'
-      : '原 ERP 页面未成功返回可核验证据，本地没有从相似页面补造按钮或查询条件。'
+      ? '顶部业务工具栏、主查询字段、下拉选项、默认值与查询区按钮已完成核对；列表、表单、弹窗和办理流程仍需业务确认。'
+      : '当前业务配置尚待确认，页面不展示未经确认的按钮或查询条件。'
   }
 }
 

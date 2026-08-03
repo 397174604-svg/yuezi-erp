@@ -8,6 +8,22 @@ export function getDietModuleData(resource, params) {
   })
 }
 
+export function getDietRoomOptions(params) {
+  return request({
+    url: '/vue-element-admin/erp/diet/modules/room-options',
+    method: 'get',
+    params
+  })
+}
+
+export function getDietStoreReferenceOptions(params) {
+  return request({
+    url: '/vue-element-admin/erp/diet/modules/reference-options',
+    method: 'get',
+    params
+  })
+}
+
 export function saveDietModuleRecord(resource, data) {
   return request({
     url: `/vue-element-admin/erp/diet/modules/${resource}/save`,
@@ -23,4 +39,3 @@ export function performDietModuleAction(resource, action, data) {
     data: { action, ...data }
   })
 }
-

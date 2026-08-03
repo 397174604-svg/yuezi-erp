@@ -1,9 +1,10 @@
 import request from '@/utils/request'
 
-export function getFinanceOptions() {
+export function getFinanceOptions(params) {
   return request({
     url: '/vue-element-admin/erp/finance/options',
-    method: 'get'
+    method: 'get',
+    params
   })
 }
 
@@ -15,10 +16,11 @@ export function getFinanceModuleData(resource, params) {
   })
 }
 
-export function getFinancePickerData(pickerType) {
+export function getFinancePickerData(pickerType, params) {
   return request({
     url: `/vue-element-admin/erp/finance/pickers/${pickerType}`,
-    method: 'get'
+    method: 'get',
+    params
   })
 }
 

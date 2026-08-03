@@ -395,5 +395,10 @@ Object.values(maternityNursePageConfigs).forEach(config => {
 })
 
 export function getMaternityNursePageConfig(title) {
-  return maternityNursePageConfigs[title] || maternityNursePageConfigs[maternityNursePageOrder[0]]
+  const featureAliases = {
+    月嫂管理: '月嫂档案',
+    月嫂档期: '月嫂档期',
+    月嫂结算: '月嫂结算列表'
+  }
+  return maternityNursePageConfigs[featureAliases[title] || title] || maternityNursePageConfigs[maternityNursePageOrder[0]]
 }

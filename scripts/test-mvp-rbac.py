@@ -36,7 +36,7 @@ CASES = (
         "韩新",
         "ERP_SALES_ACCOUNT_PASSWORD",
         "SALES_MANAGER",
-        (2,),
+        (1, 2),
         ("customers", "contracts", "receipts", "rooms", "bookings"),
         (),
     ),
@@ -53,8 +53,8 @@ CASES = (
         "ERP_ROOM_ACCOUNT_PASSWORD",
         "HOUSEKEEPER",
         (2,),
-        ("customers", "receipts", "rooms", "bookings"),
-        ("contracts",),
+        ("customers", "contracts", "receipts", "rooms", "bookings"),
+        (),
     ),
 )
 

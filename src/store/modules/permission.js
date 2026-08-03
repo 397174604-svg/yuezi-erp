@@ -7,18 +7,21 @@ import { asyncRoutes, constantRoutes } from '@/router'
  */
 function hasPermission(roles, permissions, route) {
   if (roles.includes('SYS_ADMIN')) return true
+  let hasAccessRule = false
   if (route.meta && route.meta.permissions) {
-    return route.meta.permissions.some(permission => permissions.includes(permission))
+    hasAccessRule = true
+    if (route.meta.permissions.some(permission => permissions.includes(permission))) return true
   }
   if (route.meta && route.meta.legacyNavId) {
+    hasAccessRule = true
     const codePrefix = `LEGACY.WEB.N${route.meta.legacyNavId}.`
-    return permissions.some(permission => permission.startsWith(codePrefix))
+    if (permissions.some(permission => permission.startsWith(codePrefix))) return true
   }
   if (route.meta && route.meta.roles) {
-    return roles.some(role => route.meta.roles.includes(role))
-  } else {
-    return true
+    hasAccessRule = true
+    if (roles.some(role => route.meta.roles.includes(role))) return true
   }
+  return !hasAccessRule
 }
 
 /**

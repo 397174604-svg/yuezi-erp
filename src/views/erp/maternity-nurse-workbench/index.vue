@@ -42,10 +42,12 @@
 
       <el-table
         ref="mainTable"
+        v-loading="loading"
         :data="tableRows"
         border
         stripe
         height="500"
+        :empty-text="emptyText"
         row-key="_id"
         highlight-current-row
         @selection-change="handleSelectionChange"
@@ -306,6 +308,11 @@
 <script>
 import { getMaternityNursePageConfig } from '@/config/maternity-nurse-pages'
 import AuditedSurfacePanel from '@/views/erp/components/AuditedSurfacePanel'
+import {
+  getMaternityNurseModuleData,
+  performMaternityNurseModuleAction,
+  saveMaternityNurseModuleRecord
+} from '@/api/erp-maternity-nurse'
 
 const pad = value => String(value).padStart(2, '0')
 
@@ -332,15 +339,15 @@ export default {
       pickerType: 'nurse',
       pickerQuery: { name: '', phone: '' },
       pickerCurrent: null,
-      pickerRows: [
-        { name: '示例护理师A', phone: '138****0001', status: '月嫂', store: '中心广场旗舰店' },
-        { name: '示例护理师B', phone: '138****0002', status: '育儿嫂', store: '黄河路轻奢店' }
-      ]
+      pickerRows: [],
+      rows: [],
+      loading: false,
+      loadError: ''
     }
   },
   computed: {
     pageTitle() {
-      return (this.$route.meta && this.$route.meta.title) || '月嫂档案'
+      return (this.$route.meta && (this.$route.meta.configTitle || this.$route.meta.title)) || '月嫂档案'
     },
     config() {
       return getMaternityNursePageConfig(this.pageTitle)
@@ -360,37 +367,10 @@ export default {
       })
     },
     tableRows() {
-      if (this.isSchedule) {
-        return [
-          {
-            _id: 'schedule-1',
-            field_1: '示例护理师A',
-            field_2: '138****0001',
-            schedule: [
-              { start: 0, end: 3, type: '空闲中' },
-              { start: 4, end: 7, type: '预约中' },
-              { start: 8, end: 14, type: '上户中' }
-            ]
-          },
-          {
-            _id: 'schedule-2',
-            field_1: '示例护理师B',
-            field_2: '138****0002',
-            schedule: [
-              { start: 0, end: 5, type: '请假/休假' },
-              { start: 6, end: 10, type: '空闲中' },
-              { start: 11, end: 14, type: '重叠' }
-            ]
-          }
-        ]
-      }
-      return [1, 2].map(index => {
-        const row = { _id: `${this.config.key}-${index}` }
-        this.config.columns.forEach(item => {
-          row[item.key] = this.sampleValue(item.label, index)
-        })
-        return row
-      })
+      return this.rows.map(row => this.toTableRow(row))
+    },
+    emptyText() {
+      return this.loadError || '暂无符合条件的业务数据'
     }
   },
   watch: {
@@ -400,30 +380,48 @@ export default {
         this.selectedRows = []
         this.formDialogVisible = false
         this.pickerDialogVisible = false
+        this.loadRows()
       }
     }
   },
   methods: {
-    sampleValue(label, index) {
-      if (/护理师名称|预约护理师|当前服务月嫂/.test(label)) return `示例护理师${index === 1 ? 'A' : 'B'}`
-      if (/客户名称|客户姓名/.test(label)) return `示例客户${index === 1 ? 'A' : 'B'}`
-      if (/电话|手机号|联系方式/.test(label)) return `138****000${index}`
-      if (/编号|合同号/.test(label)) return `DEMO-${pad(index)}`
-      if (/身份证/.test(label)) return '41**************00'
-      if (/门店|分店/.test(label)) return index === 1 ? '中心广场旗舰店' : '黄河路轻奢店'
-      if (/日期|时间|预产期|服务开始|服务结束/.test(label)) return `2026-08-${pad(10 + index)}`
-      if (/金额|价格|工资|奖励|社保|欠款|已收款/.test(label)) return index === 1 ? '0.00' : '100.00'
-      if (/审核状态/.test(label)) return index === 1 ? '待审核' : '已审核'
-      if (/状态/.test(label)) return index === 1 ? '正常' : '已完成'
-      if (/执业类型/.test(label)) return index === 1 ? '月嫂' : '育儿嫂'
-      if (/护理师等级|结算等级|星级/.test(label)) return index === 1 ? '初级月嫂' : '中级月嫂'
-      if (/服务类型/.test(label)) return index === 1 ? '会所入住' : '到家服务'
-      if (/是否/.test(label)) return index === 1 ? '否' : '是'
-      if (/备注/.test(label)) return '脱敏演示'
-      if (/附件/.test(label)) return '点击查看附件'
-      if (/操作/.test(label)) return ''
-      if (/天数|时长|工龄|年龄|数量/.test(label)) return String(10 + index)
-      return '--'
+    async loadRows() {
+      const resource = this.config.key
+      this.loading = true
+      this.loadError = ''
+      try {
+        const response = await getMaternityNurseModuleData(resource, {
+          storeId: this.$route.query.storeId || 'all'
+        })
+        this.rows = response.data && Array.isArray(response.data.list)
+          ? response.data.list
+          : []
+      } catch (error) {
+        this.rows = []
+        this.loadError = '数据查询失败，请稍后刷新。'
+      } finally {
+        this.loading = false
+      }
+    },
+    toTableRow(source) {
+      const archiveFields = {
+        '护理师编号': source.number,
+        '护理师名称': source.name,
+        '联系方式': source.phone,
+        '执业类型': source.practiceType,
+        '状态': source.jobStatus,
+        '入职时间': source.entryDate,
+        '所属分店': source.store,
+        '职员名称': source.name
+      }
+      const row = { ...source, _id: source.id || source.recordId || source.number }
+      this.config.columns.forEach(item => {
+        const value = Object.prototype.hasOwnProperty.call(archiveFields, item.label)
+          ? archiveFields[item.label]
+          : (source[item.key] || source[item.label])
+        row[item.key] = value === undefined || value === null || value === '' ? '--' : value
+      })
+      return row
     },
     handleSelectionChange(rows) {
       this.selectedRows = rows
@@ -453,10 +451,10 @@ export default {
         return
       }
       if (/导出|打印/.test(action)) {
-        this.$message.info(`“${action}”已保留原页入口；本地演示不生成真实业务文件`)
+        this.$message.info(`“${action}”当前仅支持已接入数据的导出或打印。`)
         return
       }
-      this.$message.info(`“${action}”已按原页保留选择规则；当前仅执行脱敏 Mock`)
+      this.$message.info(`“${action}”需要选择一条真实业务记录后执行。`)
     },
     handleQueryAction(action) {
       if (/打印/.test(action)) window.print()
@@ -493,10 +491,10 @@ export default {
         return
       }
       if (action === '查看服务详情') {
-        this.$message.info('服务详情入口已保留；当前不读取真实客户服务数据')
+        this.$message.info('请选择一条服务记录后查看详情。')
         return
       }
-      this.$message.success(`“${action}”字段校验演示完成，未写入真实业务数据`)
+      this.saveFormAction(action)
     },
     openPicker(item) {
       this.pickerField = item
@@ -504,15 +502,14 @@ export default {
       this.pickerTitle = this.pickerType === 'customer' ? '选择现有客户' : '选择护理师'
       this.pickerQuery = { name: '', phone: '' }
       this.pickerCurrent = null
-      this.pickerRows = this.pickerType === 'customer'
-        ? [
-          { name: '示例客户A', phone: '138****1001', status: '正入住', store: '中心广场旗舰店' },
-          { name: '示例客户B', phone: '138****1002', status: '未入住', store: '黄河路轻奢店' }
-        ]
-        : [
-          { name: '示例护理师A', phone: '138****0001', status: '月嫂', store: '中心广场旗舰店' },
-          { name: '示例护理师B', phone: '138****0002', status: '育儿嫂', store: '黄河路轻奢店' }
-        ]
+      this.pickerRows = this.pickerType === 'nurse'
+        ? this.rows.map(row => ({
+          name: row.name || row.field_2,
+          phone: row.phone || row.field_4,
+          status: row.practiceType || row.field_6,
+          store: row.store || row.field_12
+        })).filter(row => row.name)
+        : []
       this.pickerDialogVisible = true
     },
     confirmPicker() {
@@ -527,11 +524,36 @@ export default {
       this.pickerDialogVisible = false
     },
     generateContractNumber() {
-      this.$set(this.formModel, 'contractNumber', 'YS-DEMO-20260724')
-      this.$message.success('已生成本地演示合同编号')
+      const now = new Date()
+      this.$set(this.formModel, 'contractNumber', `YS-${formatDate(now).replace(/-/g, '')}-${String(now.getTime()).slice(-4)}`)
     },
-    runRowAction(action) {
-      this.$message.info(`“${action}”入口已按原列表保留；当前不读取真实业务附件`)
+    async runRowAction(action, row) {
+      if (!row || !row._id) {
+        this.$message.warning('请先选择真实业务记录。')
+        return
+      }
+      try {
+        await performMaternityNurseModuleAction(this.config.key, action, { id: row._id })
+        this.$message.success(`“${action}”已提交处理。`)
+        await this.loadRows()
+      } catch (error) {
+        this.$message.error('操作失败，请检查记录状态或当前账号权限。')
+      }
+    },
+    async saveFormAction(action) {
+      try {
+        await saveMaternityNurseModuleRecord(this.config.key, {
+          id: this.selectedRows[0] && this.selectedRows[0]._id,
+          action,
+          ...this.formModel,
+          storeId: this.$route.query.storeId || ''
+        })
+        this.$message.success('已保存业务记录。')
+        this.formDialogVisible = false
+        await this.loadRows()
+      } catch (error) {
+        this.$message.error('保存失败，请检查必填项、门店和记录状态。')
+      }
     },
     cellActionLabels(label) {
       return (this.config.cellActions && this.config.cellActions[label]) || []

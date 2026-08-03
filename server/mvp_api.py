@@ -23,7 +23,7 @@ from decimal import Decimal
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -50,98 +50,33 @@ from erp_read_surfaces import (
     risk_module,
     system_module,
 )
+from operational_records import (
+    apply_action,
+    business_no,
+    clean_payload,
+    identifier_field,
+    parse_record_id,
+    validate_resource,
+)
+from runtime_security import (
+    LOCAL_TOKEN_SECRET,
+    RuntimeConfigError,
+    allowed_store_id,
+    database_ssl_config,
+    discover_migrations,
+    is_production,
+    migration_checksum_matches,
+    migration_state,
+    parse_bool,
+    store_scope_clause,
+    validate_runtime_config,
+)
 
 
 MIGRATION_DIR = REPO_ROOT / "database" / "mysql" / "migrations"
-MIGRATIONS = (
-    (
-        "V20260726_004",
-        "System settings normalized configuration",
-        MIGRATION_DIR
-        / "V20260726_004__system_settings_configuration.sql",
-    ),
-    (
-        "V20260726_005",
-        "MVP customer-contract-receipt-stay loop",
-        MIGRATION_DIR / "V20260726_005__mvp_customer_contract_receipt_stay.sql",
-    ),
-    (
-        "V20260726_006",
-        "Legacy role MVP permissions",
-        MIGRATION_DIR / "V20260726_006__legacy_role_mvp_permissions.sql",
-    ),
-    (
-        "V20260726_007",
-        "Sales manager receipt and room actions",
-        MIGRATION_DIR / "V20260726_007__sales_manager_receipt_room_actions.sql",
-    ),
-    (
-        "V20260726_008",
-        "Filtered legacy access control",
-        MIGRATION_DIR / "V20260726_008__filtered_legacy_access_control.sql",
-    ),
-    (
-        "V20260726_009",
-        "Allow duplicate legacy role names",
-        MIGRATION_DIR / "V20260726_009__allow_duplicate_legacy_role_names.sql",
-    ),
-    (
-        "V20260727_010",
-        "Yellow River store room inventory",
-        MIGRATION_DIR
-        / "V20260727_010__yellow_river_room_inventory.sql",
-    ),
-    (
-        "V20260727_011",
-        "Recovery service operations",
-        MIGRATION_DIR / "V20260727_011__recovery_operations.sql",
-    ),
-    (
-        "V20260727_012",
-        "Recovery normalized permission alignment",
-        MIGRATION_DIR
-        / "V20260727_012__recovery_standard_permission_alignment.sql",
-    ),
-    (
-        "V20260727_013",
-        "Finance operations",
-        MIGRATION_DIR / "V20260727_013__finance_operations.sql",
-    ),
-    (
-        "V20260727_014",
-        "Room department operations",
-        MIGRATION_DIR / "V20260727_014__room_operations.sql",
-    ),
-    (
-        "V20260727_015",
-        "Sales role operations",
-        MIGRATION_DIR / "V20260727_015__sales_role_operations.sql",
-    ),
-    (
-        "V20260727_016",
-        "Sales manager store scope alignment",
-        MIGRATION_DIR
-        / "V20260727_016__sales_manager_store_scope_alignment.sql",
-    ),
-    (
-        "V20260727_017",
-        "Observed sales contract meal package permission",
-        MIGRATION_DIR
-        / "V20260727_017__sales_contract_meal_package_permission.sql",
-    ),
-    (
-        "V20260727_018",
-        "Customer entry integration",
-        MIGRATION_DIR
-        / "V20260727_018__customer_entry_integration.sql",
-    ),
-    (
-        "V20260728_019",
-        "Package pricing contract snapshots and entitlements",
-        MIGRATION_DIR
-        / "V20260728_019__package_pricing_entitlements.sql",
-    ),
-)
+MIGRATION_MIN_SEQUENCE = 4
+MIGRATION_LOCK_NAME = "qdf_erp_schema_migration"
+LOCAL_ACCEPTANCE_MARKER = re.compile(r"LOCAL_ACCEPTANCE_SEED_\d+")
 CONTRACT_TYPES = (
     "月子合同",
     "婴儿托管",
@@ -185,21 +120,42 @@ LEGACY_ROLE_ACCOUNTS = (
         "username": "韩新",
         "staff_names": ("韩新",),
         "role_code": "SALES_MANAGER",
+        # The authenticated legacy page exposed both stores and defaulted to
+        # the centre/建设路 store (see V20260727_016).
+        "default_store_id": 1,
+        "store_ids": (1, 2),
         "password_env": "ERP_SALES_ACCOUNT_PASSWORD",
     },
     {
         "username": "许曼",
         "staff_names": ("许曼", "许曼曼"),
         "role_code": "RECOVERY_THERAPIST",
+        "default_store_id": 2,
+        "store_ids": (2,),
         "password_env": "ERP_RECOVERY_ACCOUNT_PASSWORD",
     },
     {
         "username": "董丽霞",
         "staff_names": ("董丽霞",),
         "role_code": "HOUSEKEEPER",
+        "default_store_id": 2,
+        "store_ids": (2,),
         "password_env": "ERP_ROOM_ACCOUNT_PASSWORD",
     },
 )
+
+
+def public_business_payload(value):
+    """Hide local acceptance bookkeeping markers from formal Web responses."""
+    if isinstance(value, dict):
+        return {key: public_business_payload(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [public_business_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(public_business_payload(item) for item in value)
+    if isinstance(value, str):
+        return LOCAL_ACCEPTANCE_MARKER.sub("资料已核验", value)
+    return value
 
 RECOVERY_RESOURCE_NAV_IDS = {
     "unbooked-customer-services": 266,
@@ -212,6 +168,25 @@ RECOVERY_RESOURCE_NAV_IDS = {
     "rehab-service-records": 255,
     "completed-service-consumption": 618,
     "rehab-health-assessments": 631,
+    "recovery-programs": 553,
+    "recovery-schedule": 257,
+    "postpartum-assessments": 631,
+    "recovery-service-tracking": 255,
+    "recovery-store-dashboard": 553,
+    "recovery-upsell": 266,
+    "recovery-assets": 618,
+    "recovery-staff-performance": 541,
+}
+
+FORMAL_RECOVERY_RESOURCES = {
+    "recovery-programs",
+    "recovery-schedule",
+    "postpartum-assessments",
+    "recovery-service-tracking",
+    "recovery-store-dashboard",
+    "recovery-upsell",
+    "recovery-assets",
+    "recovery-staff-performance",
 }
 
 RECOVERY_ACTION_BUTTON_IDS = {
@@ -247,6 +222,7 @@ FINANCE_RESOURCE_NAV_IDS = {
     "debt-audits": 281,
     "exchange-audits": 653,
     "invoices": 572,
+    "reconciliations": 90,
     "material-budgets": 251,
     "my-expenses": 317,
     "expense-audits": 607,
@@ -255,7 +231,7 @@ FINANCE_RESOURCE_NAV_IDS = {
 
 FINANCE_ACTION_BUTTON_IDS = {
     "receipts": {
-        "添加": 1,
+        "前往新增收款": 1,
         "删除": 3,
         "编辑": 10,
         "导出": 19,
@@ -265,7 +241,7 @@ FINANCE_ACTION_BUTTON_IDS = {
         "核销": 60,
         "星支付": 93,
         "批量审核": 96,
-        "开具发票": 120,
+        "登记真实发票": 120,
         "手续费": 125,
         "扫码支付": 137,
     },
@@ -275,13 +251,24 @@ FINANCE_ACTION_BUTTON_IDS = {
         "编辑": 10,
         "导出": 19,
         "打印": 48,
-        "打款": 54,
         "提交": 58,
     },
-    "refund-audits": {"反审核": 49, "流程审批": 51, "撤回": 132},
+    "refund-audits": {
+        "反审核": 49,
+        "流程审批": 51,
+        "登记退款打款": 54,
+        "撤回": 132,
+    },
     "debt-audits": {"审核": 21},
     "exchange-audits": {"删除": 3, "审核": 21},
     "invoices": {"删除": 3, "导出": 19},
+    "reconciliations": {
+        "添加": 1,
+        "确认匹配": 21,
+        "取消匹配": 49,
+        "删除": 3,
+        "导出": 19,
+    },
     "material-budgets": {
         "添加": 1,
         "删除": 3,
@@ -444,6 +431,7 @@ SALES_ACTION_BUTTON_IDS = {
         "审核": 21,
         "停用": 35,
         "反审核": 49,
+        "核销": "SALES.DISCOUNT.CONSUME",
     },
     "card-packages": {
         "添加": 1,
@@ -492,24 +480,89 @@ class ApiError(Exception):
         self.code = code
 
 
+CUSTOMER_SERVICE_TRANSITIONS = {
+    "F005": {
+        "START": ({"待回访"}, "跟进中"),
+        "COMPLETE": ({"待回访", "跟进中"}, "已完成"),
+        "ESCALATE": ({"待回访", "跟进中"}, "已升级"),
+        "REOPEN": ({"已完成", "已升级"}, "跟进中"),
+    },
+    "F043": {
+        "SUBMIT": ({"草稿"}, "待审核"),
+        "PUBLISH": ({"待审核"}, "已发布"),
+        "DISABLE": ({"已发布"}, "已停用"),
+        "REOPEN": ({"待审核", "已停用"}, "草稿"),
+    },
+    "F084": {
+        "QUEUE": ({"草稿"}, "待发送"),
+        "SEND": ({"待发送", "待通道配置"}, "已发送"),
+        "CANCEL": ({"草稿", "待发送", "待通道配置"}, "已取消"),
+    },
+    "F094": {
+        "ACCEPT": ({"待接入"}, "处理中"),
+        "REPLY": ({"处理中", "等待客户"}, "处理中"),
+        "WAIT": ({"处理中"}, "等待客户"),
+        "TRANSFER": ({"待接入", "处理中", "等待客户"}, "已转工单"),
+        "AI_REPLY": ({"处理中"}, "处理中"),
+        "CLOSE": ({"处理中", "等待客户", "已转工单"}, "已关闭"),
+    },
+}
+
+
+def customer_service_transition(
+    feature_code: str,
+    current_status: str,
+    action: str,
+    channel: str = "",
+) -> tuple[str, bool]:
+    """Validate one customer-service state transition.
+
+    The boolean indicates that an external integration is required and must
+    never be reported as successful by the local ERP.
+    """
+    feature = str(feature_code or "").upper()
+    action_code = str(action or "").upper()
+    transition = CUSTOMER_SERVICE_TRANSITIONS.get(feature, {}).get(action_code)
+    if not transition:
+        raise ApiError("当前客服状态操作不存在", 404, 40400)
+    allowed_states, target_status = transition
+    if current_status not in allowed_states:
+        raise ApiError("当前状态不能执行此操作", 409, 40900)
+    external_required = action_code == "AI_REPLY"
+    if feature == "F084" and action_code == "SEND":
+        internal_channels = {"站内", "站内消息", "站内通知"}
+        external_required = str(channel or "").strip() not in internal_channels
+        if external_required:
+            target_status = "待通道配置"
+    return target_status, external_required
+
+
 def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
 
 
 def db_config(database: str | None = None) -> dict:
-    password = env("ERP_DB_PASSWORD")
-    if not password:
-        raise SystemExit("ERP_DB_PASSWORD is required.")
-    return {
+    try:
+        validate_runtime_config()
+        ssl = database_ssl_config()
+    except RuntimeConfigError as exc:
+        raise SystemExit(str(exc)) from exc
+    config = {
         "host": env("ERP_DB_HOST", "127.0.0.1"),
         "port": int(env("ERP_DB_PORT", "3306")),
         "user": env("ERP_DB_USER", "root"),
-        "password": password,
+        "password": env("ERP_DB_PASSWORD"),
         "database": database or env("ERP_DB_NAME", "yuezi"),
         "charset": "utf8mb4",
         "cursorclass": DictCursor,
         "autocommit": False,
+        "connect_timeout": int(env("ERP_DB_CONNECT_TIMEOUT", "5")),
+        "read_timeout": int(env("ERP_DB_READ_TIMEOUT", "30")),
+        "write_timeout": int(env("ERP_DB_WRITE_TIMEOUT", "30")),
     }
+    if ssl:
+        config["ssl"] = ssl
+    return config
 
 
 def connect(database: str | None = None):
@@ -546,7 +599,9 @@ def token_secret() -> bytes:
     configured = env("ERP_TOKEN_SECRET")
     if configured:
         return configured.encode("utf-8")
-    return b"local-mvp-token-secret-change-before-production"
+    if is_production():
+        raise RuntimeConfigError("ERP_TOKEN_SECRET is required in production.")
+    return LOCAL_TOKEN_SECRET.encode("utf-8")
 
 
 def issue_token(user_id: int, username: str) -> str:
@@ -630,10 +685,100 @@ def split_sql(sql_text: str) -> list[str]:
     return [statement.strip() for statement in "\n".join(lines).split(";") if statement.strip()]
 
 
-def apply_migrations() -> list[dict]:
+def _migration_state_from_rows(
+    all_migrations,
+    active_migrations,
+    applied_rows,
+) -> dict:
+    known = {item.version: item for item in all_migrations}
+    active_versions = {item.version for item in active_migrations}
+    applied = {row["version"]: row["checksum"] for row in applied_rows}
+    state_input = {
+        version: checksum
+        for version, checksum in applied.items()
+        if version in active_versions or version not in known
+    }
+    state = migration_state(active_migrations, state_input)
+    baseline_mismatches = [
+        version
+        for version, checksum in applied.items()
+        if version in known
+        and version not in active_versions
+        and not migration_checksum_matches(known[version], checksum)
+    ]
+    state["checksumMismatches"] = sorted(
+        set(state["checksumMismatches"] + baseline_mismatches)
+    )
+    state["current"] = (
+        not state["pending"]
+        and not state["checksumMismatches"]
+        and not state["unknownApplied"]
+    )
+    return state
+
+
+def _migration_status(connection) -> dict:
+    all_migrations = discover_migrations(
+        MIGRATION_DIR,
+        minimum_sequence=1,
+    )
+    migrations = tuple(
+        item for item in all_migrations if item.sequence >= MIGRATION_MIN_SEQUENCE
+    )
+    table = execute_one(
+        connection,
+        """
+        SELECT COUNT(*) AS total
+        FROM information_schema.tables
+        WHERE table_schema=%s AND table_name='schema_migrations'
+        """,
+        (env("ERP_DB_NAME", "yuezi"),),
+    )
+    if not table or not table["total"]:
+        status = migration_state(migrations, {})
+        status["schemaTable"] = False
+        return status
+    applied_rows = execute_all(
+        connection,
+        "SELECT version, checksum FROM schema_migrations ORDER BY version",
+    )
+    status = _migration_state_from_rows(
+        all_migrations,
+        migrations,
+        applied_rows,
+    )
+    status["schemaTable"] = True
+    return status
+
+
+def apply_migrations(include_baseline: bool = False) -> list[dict]:
+    all_migrations = discover_migrations(
+        MIGRATION_DIR,
+        minimum_sequence=1,
+    )
+    migrations = (
+        all_migrations
+        if include_baseline
+        else tuple(
+            item
+            for item in all_migrations
+            if item.sequence >= MIGRATION_MIN_SEQUENCE
+        )
+    )
     connection = connect()
+    lock_acquired = False
     try:
         with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT GET_LOCK(%s, %s) AS acquired",
+                (
+                    MIGRATION_LOCK_NAME,
+                    int(env("ERP_MIGRATION_LOCK_TIMEOUT", "30")),
+                ),
+            )
+            lock_acquired = cursor.fetchone()["acquired"] == 1
+            if not lock_acquired:
+                raise RuntimeError("Could not acquire the database migration lock.")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -646,22 +791,42 @@ def apply_migrations() -> list[dict]:
                   COLLATE=utf8mb4_unicode_ci
                 """
             )
+            connection.commit()
+            applied_rows = execute_all(
+                connection,
+                "SELECT version, checksum FROM schema_migrations ORDER BY version",
+            )
+            state = _migration_state_from_rows(
+                all_migrations,
+                migrations,
+                applied_rows,
+            )
+            if state["checksumMismatches"]:
+                raise RuntimeError(
+                    "Applied migration checksum mismatch: "
+                    + ", ".join(state["checksumMismatches"])
+                )
+            if state["unknownApplied"]:
+                raise RuntimeError(
+                    "Database contains migrations absent from this release: "
+                    + ", ".join(state["unknownApplied"])
+                )
             results = []
-            for version, description, path in MIGRATIONS:
-                sql_text = path.read_text(encoding="utf-8")
-                checksum = hashlib.sha256(sql_text.encode("utf-8")).hexdigest()
+            for migration in migrations:
                 cursor.execute(
                     "SELECT checksum FROM schema_migrations WHERE version=%s",
-                    (version,),
+                    (migration.version,),
                 )
                 existing = cursor.fetchone()
                 if existing:
-                    if existing["checksum"] != checksum:
-                        raise SystemExit(
-                            f"{version} was applied with a different checksum."
-                        )
-                    results.append({"version": version, "status": "already-applied"})
+                    results.append(
+                        {
+                            "version": migration.version,
+                            "status": "already-applied",
+                        }
+                    )
                     continue
+                sql_text = migration.path.read_text(encoding="utf-8")
                 for statement in split_sql(sql_text):
                     cursor.execute(statement)
                 cursor.execute(
@@ -669,15 +834,30 @@ def apply_migrations() -> list[dict]:
                     INSERT INTO schema_migrations(version, description, checksum)
                     VALUES (%s, %s, %s)
                     """,
-                    (version, description, checksum),
+                    (
+                        migration.version,
+                        migration.description,
+                        migration.checksum,
+                    ),
                 )
-                results.append({"version": version, "status": "applied"})
-        connection.commit()
+                connection.commit()
+                results.append(
+                    {"version": migration.version, "status": "applied"}
+                )
         return results
     except Exception:
         connection.rollback()
         raise
     finally:
+        if lock_acquired:
+            try:
+                execute_one(
+                    connection,
+                    "SELECT RELEASE_LOCK(%s) AS released",
+                    (MIGRATION_LOCK_NAME,),
+                )
+            except Exception:
+                pass
         connection.close()
 
 
@@ -758,12 +938,17 @@ def bootstrap(seed_rooms: bool = True) -> dict:
                 )
             seeded_rooms = 0
             if seed_rooms:
-                cursor.execute(
-                    "SELECT COUNT(*) AS total FROM rooms WHERE tenant_id=1"
-                )
-                if cursor.fetchone()["total"] == 0:
-                    room_numbers = (("201", 2), ("202", 2))
-                    for store in stores:
+                room_numbers = (("201", 2), ("202", 2))
+                for store in stores:
+                    cursor.execute(
+                        """
+                        SELECT COUNT(*) AS total
+                        FROM rooms
+                        WHERE tenant_id=1 AND store_id=%s
+                        """,
+                        (store["store_id"],),
+                    )
+                    if cursor.fetchone()["total"] == 0:
                         for room_no, floor in room_numbers:
                             cursor.execute(
                                 """
@@ -834,6 +1019,24 @@ def bootstrap_role_accounts() -> list[dict]:
                 role = cursor.fetchone()
                 if not role:
                     raise SystemExit(f"Role {item['role_code']} is missing.")
+                store_ids = tuple(item["store_ids"])
+                placeholders = ",".join(["%s"] * len(store_ids))
+                cursor.execute(
+                    f"""
+                    SELECT store_id FROM stores
+                    WHERE tenant_id=1 AND store_id IN ({placeholders})
+                    """,
+                    store_ids,
+                )
+                existing_store_ids = {
+                    int(row["store_id"]) for row in cursor.fetchall()
+                }
+                missing_store_ids = sorted(set(store_ids) - existing_store_ids)
+                if missing_store_ids:
+                    raise SystemExit(
+                        "Account store scope is missing: "
+                        + ", ".join(str(value) for value in missing_store_ids)
+                    )
                 cursor.execute(
                     """
                     SELECT user_id FROM user_accounts
@@ -856,7 +1059,7 @@ def bootstrap_role_accounts() -> list[dict]:
                         (
                             staff["staff_id"],
                             encoded,
-                            staff["store_id"],
+                            item["default_store_id"],
                             user_id,
                         ),
                     )
@@ -872,7 +1075,7 @@ def bootstrap_role_accounts() -> list[dict]:
                             staff["staff_id"],
                             item["username"],
                             encoded,
-                            staff["store_id"],
+                            item["default_store_id"],
                         ),
                     )
                     user_id = cursor.lastrowid
@@ -885,20 +1088,22 @@ def bootstrap_role_accounts() -> list[dict]:
                     (user_id, role["role_id"]),
                 )
                 cursor.execute("DELETE FROM user_stores WHERE user_id=%s", (user_id,))
-                cursor.execute(
-                    """
-                    INSERT INTO user_stores(user_id, store_id, access_level)
-                    VALUES (%s,%s,'MANAGE')
-                    """,
-                    (user_id, staff["store_id"]),
-                )
+                for store_id in store_ids:
+                    cursor.execute(
+                        """
+                        INSERT INTO user_stores(user_id, store_id, access_level)
+                        VALUES (%s,%s,'MANAGE')
+                        """,
+                        (user_id, store_id),
+                    )
                 created.append(
                     {
                         "username": item["username"],
                         "staff_name": staff["name"],
                         "role_code": item["role_code"],
                         "role_name": role["name"],
-                        "store_id": staff["store_id"],
+                        "default_store_id": item["default_store_id"],
+                        "store_ids": list(store_ids),
                     }
                 )
         connection.commit()
@@ -913,7 +1118,7 @@ def bootstrap_role_accounts() -> list[dict]:
 def verify_database() -> dict:
     connection = connect()
     try:
-        result = {}
+        result = {"migrations": _migration_status(connection)}
         for table in (
             "user_accounts",
             "customers",
@@ -995,6 +1200,62 @@ def verify_database() -> dict:
             ORDER BY ua.user_id
             """,
         )
+        integrity_checks = {
+            "cross_tenant_staff_accounts": """
+                SELECT COUNT(*) AS total
+                FROM user_accounts ua
+                JOIN staff st ON st.staff_id=ua.staff_id
+                WHERE st.tenant_id<>ua.tenant_id
+            """,
+            "cross_tenant_default_stores": """
+                SELECT COUNT(*) AS total
+                FROM user_accounts ua
+                JOIN stores s ON s.store_id=ua.default_store_id
+                WHERE s.tenant_id<>ua.tenant_id
+            """,
+            "cross_tenant_user_stores": """
+                SELECT COUNT(*) AS total
+                FROM user_stores us
+                JOIN user_accounts ua ON ua.user_id=us.user_id
+                JOIN stores s ON s.store_id=us.store_id
+                WHERE s.tenant_id<>ua.tenant_id
+            """,
+            "cross_tenant_user_roles": """
+                SELECT COUNT(*) AS total
+                FROM user_roles ur
+                JOIN user_accounts ua ON ua.user_id=ur.user_id
+                JOIN roles r ON r.role_id=ur.role_id
+                WHERE r.tenant_id<>ua.tenant_id
+            """,
+            "default_store_without_grant": """
+                SELECT COUNT(*) AS total
+                FROM user_accounts ua
+                LEFT JOIN user_stores us
+                  ON us.user_id=ua.user_id
+                 AND us.store_id=ua.default_store_id
+                WHERE ua.status='ACTIVE' AND ua.default_store_id IS NOT NULL
+                  AND us.user_id IS NULL
+            """,
+            "active_accounts_without_store": """
+                SELECT COUNT(*) AS total
+                FROM user_accounts ua
+                LEFT JOIN user_stores us ON us.user_id=ua.user_id
+                WHERE ua.status='ACTIVE'
+                GROUP BY ua.user_id
+                HAVING COUNT(us.store_id)=0
+            """,
+        }
+        security_integrity = {}
+        for name, sql in integrity_checks.items():
+            if name == "active_accounts_without_store":
+                security_integrity[name] = len(execute_all(connection, sql))
+            else:
+                security_integrity[name] = execute_one(connection, sql)["total"]
+        result["security_integrity"] = security_integrity
+        result["security_integrity_passed"] = (
+            result["migrations"]["current"]
+            and all(value == 0 for value in security_integrity.values())
+        )
         return result
     finally:
         connection.close()
@@ -1012,6 +1273,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(HTTPStatus.NO_CONTENT)
         self._cors_headers()
+        self._security_headers()
         self.end_headers()
 
     def do_GET(self):
@@ -1039,27 +1301,43 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Token")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 
+    def _security_headers(self):
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+
     def _json(self, status: int, payload: dict):
         body = json.dumps(
             payload, ensure_ascii=False, default=json_default
         ).encode("utf-8")
         self.send_response(status)
         self._cors_headers()
+        self._security_headers()
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
     def _success(self, data=None):
-        self._json(200, {"code": 20000, "data": data or {}})
+        self._json(
+            200,
+            {"code": 20000, "data": public_business_payload(data or {})},
+        )
 
     def _body(self) -> dict:
-        length = int(self.headers.get("Content-Length", "0"))
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError as exc:
+            raise ApiError("Content-Length 不正确") from exc
         if length <= 0:
             return {}
+        maximum = int(env("ERP_MAX_REQUEST_BYTES", str(1024 * 1024)))
+        if length > maximum:
+            raise ApiError("请求内容过大", 413, 41300)
         try:
             return json.loads(self.rfile.read(length).decode("utf-8"))
-        except json.JSONDecodeError as exc:
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ApiError("请求内容不是有效 JSON") from exc
 
     def _handle(self):
@@ -1074,12 +1352,27 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 return self._success(
                     {
                         "service": "qdf-erp-mvp",
-                        "database": env("ERP_DB_NAME", "yuezi"),
+                        "status": "alive",
                         "time": datetime.now().isoformat(timespec="seconds"),
                     }
                 )
 
             connection = connect()
+            if path == "/api/ready":
+                database = execute_one(connection, "SELECT 1 AS ready")
+                migrations = _migration_status(connection)
+                status = 200 if database and migrations["current"] else 503
+                return self._json(
+                    status,
+                    {
+                        "code": 20000 if status == 200 else 50300,
+                        "data": {
+                            "service": "qdf-erp-mvp",
+                            "status": "ready" if status == 200 else "not-ready",
+                            "migrations": migrations,
+                        },
+                    },
+                )
             if path == "/vue-element-admin/user/login" and self.command == "POST":
                 return self._login(connection, body)
             if (
@@ -1094,6 +1387,36 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             if path == "/vue-element-admin/user/info":
                 return self._user_info(connection, user)
 
+            baby_prefix = "/vue-element-admin/erp/baby/modules"
+            if path.startswith(baby_prefix):
+                resource = path[len(baby_prefix):].strip("/")
+                operation = ""
+                if resource.endswith(("/save", "/action")):
+                    resource, operation = resource.rsplit("/", 1)
+                if "/" in resource or not resource:
+                    raise ApiError("宝宝照护资源不存在", 404, 40400)
+                self._require_any_permission(user, ("NURSING.VIEW",))
+                if self.command == "GET":
+                    scoped_user = self._user_for_selected_store(user, query)
+                    return self._success(
+                        self._merge_operational_module_rows(
+                            connection,
+                            scoped_user,
+                            "BABY",
+                            resource,
+                            query,
+                            {"list": [], "total": 0},
+                        )
+                    )
+                return self._post_operational_module_record(
+                    connection,
+                    user,
+                    "BABY",
+                    resource,
+                    operation,
+                    body,
+                )
+
             foundation_prefix = "/vue-element-admin/erp/foundation"
             if path.startswith(foundation_prefix):
                 resource = path[len(foundation_prefix):] or "/"
@@ -1101,10 +1424,12 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     user, ("SYSTEM.VIEW", "BASIC.VIEW")
                 )
                 if self.command == "GET" and resource == "/overview":
-                    return self._success(foundation_overview(connection, user))
-                raise ApiError(
-                    "当前基础平台页面尚未接入写操作", 403, 40300
-                )
+                    return self._success(foundation_overview(connection, self._user_for_selected_store(user, query)))
+                if self.command == "POST":
+                    return self._post_foundation_resource(
+                        connection, user, resource, body
+                    )
+                raise ApiError("基础平台资源不存在", 404, 40400)
 
             read_module_routes = (
                 (
@@ -1150,26 +1475,97 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 if not path.startswith(route_prefix):
                     continue
                 resource = path[len(route_prefix):].strip("/")
+                operation = ""
+                if resource.endswith(("/save", "/action")):
+                    resource, operation = resource.rsplit("/", 1)
                 if "/" in resource or not resource:
                     if self.command == "GET" and resource.endswith("/preview"):
-                        resource = resource.rsplit("/", 1)[0]
-                    elif self.command == "POST" and resource.endswith(
-                        ("/save", "/action")
-                    ):
                         resource = resource.rsplit("/", 1)[0]
                     else:
                         raise ApiError(
                             f"{module_name}资源不存在", 404, 40400
                         )
                 self._require_any_permission(user, permissions)
+                if (
+                    self.command == "GET"
+                    and module_name == "护理"
+                    and resource == "reference-options"
+                ):
+                    return self._get_store_reference_options(
+                        connection, user, "NURSING", query
+                    )
                 if self.command != "GET":
+                    if module_name == "护理" and operation:
+                        return self._post_operational_module_record(
+                            connection,
+                            user,
+                            "NURSING",
+                            resource,
+                            operation,
+                            body,
+                        )
+                    if module_name == "月嫂" and operation:
+                        return self._post_operational_module_record(
+                            connection,
+                            user,
+                            "MATRON",
+                            resource,
+                            operation,
+                            body,
+                        )
+                    durable_module = {
+                        "查询报表": "REPORT",
+                        "基础资料": "BASIC",
+                    }.get(module_name)
+                    if durable_module and operation:
+                        return self._post_operational_module_record(
+                            connection,
+                            user,
+                            durable_module,
+                            resource,
+                            operation,
+                            body,
+                        )
                     raise ApiError(
                         f"当前{module_name}页面尚未接入写操作",
                         403,
                         40300,
                     )
                 try:
-                    return self._success(loader(connection, user, resource))
+                    scoped_user = self._user_for_selected_store(user, query)
+                    requested_store = self._requested_store_id(scoped_user, query)
+                    data = (
+                        loader(
+                            connection,
+                            scoped_user,
+                            resource,
+                            requested_store,
+                        )
+                        if module_name == "护理"
+                        else loader(connection, scoped_user, resource)
+                    )
+                    if (
+                        module_name == "护理"
+                        and resource != "nursing-center"
+                    ):
+                        data = self._merge_operational_module_rows(
+                            connection,
+                            scoped_user,
+                            "NURSING",
+                            resource,
+                            query,
+                            data,
+                        )
+                    if module_name == "月嫂":
+                        data = self._merge_operational_module_rows(
+                            connection,
+                            scoped_user,
+                            "MATRON",
+                            resource,
+                            query,
+                            data,
+                        )
+                    return self._success(data)
                 except KeyError as exc:
                     raise ApiError(
                         f"{module_name}资源不存在", 404, 40400
@@ -1177,14 +1573,37 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
 
             mama_box_prefix = "/vue-element-admin/erp/mama-box"
             if path.startswith(mama_box_prefix):
-                resource = path[len(mama_box_prefix):] or "/"
+                resource = unquote(path[len(mama_box_prefix):] or "/")
                 self._require_any_permission(
                     user, ("MALL.VIEW", "SYSTEM.VIEW")
                 )
                 if self.command == "GET" and resource == "/overview":
                     return self._success(mama_box_overview(connection, user))
-                raise ApiError(
-                    "当前妈妈端管理页面尚未接入写操作", 403, 40300
+                save_match = re.fullmatch(r"/([^/]+)/save", resource)
+                action_match = re.fullmatch(r"/([^/]+)/([^/]+)/([^/]+)", resource)
+                if self.command == "POST" and (save_match or action_match):
+                    resource_name = (save_match or action_match).group(1)
+                    operation = "save" if save_match else "action"
+                    payload = dict(body)
+                    if action_match:
+                        payload.setdefault("recordId", action_match.group(2))
+                        payload.setdefault("action", action_match.group(3))
+                    return self._post_operational_module_record(
+                        connection, user, "MALL", resource_name, operation, payload
+                    )
+                raise ApiError("妈妈端管理资源不存在", 404, 40400)
+
+            contract_archive_prefix = (
+                "/vue-element-admin/erp/contract-archives"
+            )
+            if path.startswith(contract_archive_prefix):
+                resource = path[len(contract_archive_prefix):] or "/"
+                if self.command == "GET":
+                    return self._get_contract_archive_resource(
+                        connection, user, resource, query
+                    )
+                return self._post_contract_archive_resource(
+                    connection, user, resource, body
                 )
 
             finance_prefix = "/vue-element-admin/erp/finance"
@@ -1209,6 +1628,38 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     connection, user, resource, body
                 )
 
+            research_prefix = "/vue-element-admin/erp/research/modules"
+            if path.startswith(research_prefix):
+                resource = path[len(research_prefix):].strip("/")
+                operation = ""
+                if resource.endswith(("/save", "/action")):
+                    resource, operation = resource.rsplit("/", 1)
+                if resource != "beauty-cases":
+                    raise ApiError("科研美容资源不存在", 404, 40400)
+                self._require_any_permission(
+                    user, ("RECOVERY.VIEW", "CUSTOMER.VIEW")
+                )
+                if self.command == "GET":
+                    scoped_user = self._user_for_selected_store(user, query)
+                    rows = self._operational_module_rows(
+                        connection,
+                        scoped_user,
+                        "RESEARCH",
+                        resource,
+                        query,
+                    )
+                    return self._success(
+                        {"list": rows, "total": len(rows), "source": "mysql"}
+                    )
+                return self._post_operational_module_record(
+                    connection,
+                    user,
+                    "RESEARCH",
+                    resource,
+                    operation,
+                    body,
+                )
+
             customer_prefix = "/vue-element-admin/erp/customer"
             if path.startswith(customer_prefix):
                 resource = path[len(customer_prefix):] or "/"
@@ -1220,7 +1671,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 if self.command == "GET" and customer_module:
                     return self._get_customer_module_data(
                         connection,
-                        user,
+                        self._user_for_selected_store(user, query),
                         customer_module.group(1),
                         query,
                     )
@@ -1237,23 +1688,76 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                         return self._create_customer_entry(
                             connection, user, body
                         )
-                    if re.fullmatch(
-                        r"/modules/[^/]+/(save|action)", resource
-                    ):
-                        raise ApiError(
-                            "当前客户页面尚未接入此写操作",
-                            403,
-                            40300,
+                    module_operation = re.fullmatch(
+                        r"/modules/([^/]+)/(save|action)", resource
+                    )
+                    if module_operation:
+                        module, operation = module_operation.groups()
+                        return self._post_operational_module_record(
+                            connection,
+                            user,
+                            "CUSTOMER",
+                            module,
+                            operation,
+                            body,
                         )
+
+            asset_prefix = "/vue-element-admin/erp/assets"
+            if path.startswith(asset_prefix):
+                resource = path[len(asset_prefix):] or "/"
+                self._require_any_permission(
+                    user, ("CUSTOMER.VIEW", "FINANCE.VIEW")
+                )
+                if self.command == "GET":
+                    selected_store = str((query or {}).get("storeId") or "").strip().lower()
+                    asset_user = user if selected_store in {"", "all"} else self._user_for_selected_store(user, query)
+                    return self._get_member_asset_resource(
+                        connection, asset_user, resource, query
+                    )
+                return self._post_member_asset_resource(
+                    connection, user, resource, body
+                )
+
+            service_prefix = "/vue-element-admin/erp/service"
+            if path.startswith(service_prefix):
+                resource = path[len(service_prefix):] or "/"
+                if self.command == "GET":
+                    return self._get_service_resource(
+                        connection,
+                        user,
+                        resource,
+                        query,
+                    )
+                return self._post_service_resource(
+                    connection, user, resource, body
+                )
 
             diet_prefix = "/vue-element-admin/erp/diet/modules"
             if path.startswith(diet_prefix):
                 resource = path[len(diet_prefix):].strip("/")
                 if self.command == "GET":
+                    if resource == "room-options":
+                        return self._get_diet_room_options(
+                            connection, user, query
+                        )
+                    if resource == "reference-options":
+                        return self._get_store_reference_options(
+                            connection, user, "DIET", query
+                        )
                     return self._get_diet_module_data(
                         connection, user, resource, query
                     )
-                raise ApiError("当前膳食页面尚未接入写操作", 403, 40300)
+                match = re.fullmatch(r"([^/]+)/(save|action)", resource)
+                if not match:
+                    raise ApiError("膳食资源不存在", 404, 40400)
+                return self._post_operational_module_record(
+                    connection,
+                    user,
+                    "DIET",
+                    match.group(1),
+                    match.group(2),
+                    body,
+                )
 
             catalog_prefix = "/vue-element-admin/erp/catalog"
             if path.startswith(catalog_prefix):
@@ -1274,7 +1778,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     if not match:
                         raise ApiError("销售资源不存在", 404, 40400)
                     return self._get_sales_module_data(
-                        connection, user, match.group(1), query
+                        connection, self._user_for_selected_store(user, query), match.group(1), query
                     )
                 return self._post_sales_resource(
                     connection, user, resource, body
@@ -1301,16 +1805,35 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     return self._get_mall_module_data(
                         connection, user, resource, query
                     )
-                raise ApiError("当前商城页面尚未接入写操作", 403, 40300)
+                match = re.fullmatch(r"([^/]+)/(save|action)", resource)
+                if not match:
+                    raise ApiError("商城资源不存在", 404, 40400)
+                return self._post_operational_module_record(
+                    connection, user, "MALL", match.group(1), match.group(2), body
+                )
 
             inventory_prefix = "/vue-element-admin/erp/inventory/modules"
             if path.startswith(inventory_prefix):
                 resource = path[len(inventory_prefix):].strip("/")
                 if self.command == "GET":
+                    if resource == "reference-options":
+                        return self._get_store_reference_options(
+                            connection, user, "INVENTORY", query
+                        )
                     return self._get_inventory_module_data(
                         connection, user, resource, query
                     )
-                raise ApiError("当前仓存页面尚未接入写操作", 403, 40300)
+                match = re.fullmatch(r"([^/]+)/(save|action)", resource)
+                if not match:
+                    raise ApiError("仓存资源不存在", 404, 40400)
+                return self._post_operational_module_record(
+                    connection,
+                    user,
+                    "INVENTORY",
+                    match.group(1),
+                    match.group(2),
+                    body,
+                )
 
             prefix = "/vue-element-admin/erp/mvp"
             if path.startswith(prefix):
@@ -1354,20 +1877,36 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             """,
             (username,),
         )
-        if (
-            not account
-            or account["status"] != "ACTIVE"
-            or not check_password(password, account["password_hash"])
-        ):
+        locked = bool(
+            account
+            and account.get("locked_until")
+            and account["locked_until"] > datetime.now()
+        )
+        valid = bool(
+            account
+            and account["status"] == "ACTIVE"
+            and not locked
+            and check_password(password, account["password_hash"])
+        )
+        if not valid:
             if account:
                 with connection.cursor() as cursor:
                     cursor.execute(
                         """
                         UPDATE user_accounts
-                        SET failed_login_count=failed_login_count+1
+                        SET failed_login_count=failed_login_count+1,
+                            locked_until=CASE
+                              WHEN failed_login_count+1 >= %s
+                              THEN DATE_ADD(NOW(), INTERVAL %s MINUTE)
+                              ELSE locked_until
+                            END
                         WHERE user_id=%s
                         """,
-                        (account["user_id"],),
+                        (
+                            int(env("ERP_LOGIN_MAX_FAILURES", "5")),
+                            int(env("ERP_LOGIN_LOCK_MINUTES", "15")),
+                            account["user_id"],
+                        ),
                     )
                 connection.commit()
             raise ApiError("账号或密码错误", 401, 60204)
@@ -1386,7 +1925,13 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         )
 
     def _authenticate(self, connection, query: dict) -> dict:
-        token = self.headers.get("X-Token") or query.get("token", "")
+        token = self.headers.get("X-Token", "")
+        if (
+            not token
+            and not is_production()
+            and parse_bool(env("ERP_ALLOW_QUERY_TOKEN"), False)
+        ):
+            token = query.get("token", "")
         payload = verify_token(token)
         user = execute_one(
             connection,
@@ -1395,9 +1940,9 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                    department_id, status, must_change_password, source_system,
                    legacy_user_id
             FROM user_accounts
-            WHERE user_id=%s
+            WHERE user_id=%s AND username=%s
             """,
-            (payload["uid"],),
+            (payload["uid"], payload["username"]),
         )
         if not user or user["status"] != "ACTIVE":
             raise ApiError("账号已停用", 401, 50008)
@@ -1407,12 +1952,12 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             SELECT r.role_id, r.code, r.name
             FROM user_roles ur
             JOIN roles r ON r.role_id=ur.role_id
-            WHERE ur.user_id=%s AND r.status='ACTIVE'
+            WHERE ur.user_id=%s AND r.tenant_id=%s AND r.status='ACTIVE'
               AND ur.effective_from<=NOW()
               AND (ur.effective_to IS NULL OR ur.effective_to>NOW())
             ORDER BY r.is_system DESC, r.data_scope DESC, r.role_id
             """,
-            (user["user_id"],),
+            (user["user_id"], user["tenant_id"]),
         )
         user["roles"] = [row["code"] for row in role_rows]
         user["role_names"] = [row["name"] for row in role_rows]
@@ -1420,8 +1965,15 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             row["store_id"]
             for row in execute_all(
                 connection,
-                "SELECT store_id FROM user_stores WHERE user_id=%s",
-                (user["user_id"],),
+                """
+                SELECT s.store_id
+                FROM user_stores us
+                JOIN stores s ON s.store_id=us.store_id
+                WHERE us.user_id=%s AND s.tenant_id=%s
+                  AND s.status IN ('ACTIVE','NORMAL','正常','启用')
+                ORDER BY s.store_id
+                """,
+                (user["user_id"], user["tenant_id"]),
             )
         ]
         user["permissions"] = [
@@ -1436,12 +1988,12 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                   AND rp.effect='ALLOW'
                 JOIN permissions p ON p.permission_id=rp.permission_id
                   AND p.status='ACTIVE'
-                WHERE ur.user_id=%s
+                WHERE ur.user_id=%s AND r.tenant_id=%s
                   AND ur.effective_from<=NOW()
                   AND (ur.effective_to IS NULL OR ur.effective_to>NOW())
                 ORDER BY p.code
                 """,
-                (user["user_id"],),
+                (user["user_id"], user["tenant_id"]),
             )
         ]
         field_rules = execute_all(
@@ -1451,13 +2003,13 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             FROM user_roles ur
             JOIN field_permissions fp ON fp.role_id=ur.role_id
             JOIN roles r ON r.role_id=ur.role_id AND r.status='ACTIVE'
-            WHERE ur.user_id=%s
+            WHERE ur.user_id=%s AND r.tenant_id=%s
               AND fp.resource_code='CUSTOMER.PROFILE'
               AND fp.field_code='mobile'
               AND ur.effective_from<=NOW()
               AND (ur.effective_to IS NULL OR ur.effective_to>NOW())
             """,
-            (user["user_id"],),
+            (user["user_id"], user["tenant_id"]),
         )
         user["unmasked_customer_phone"] = any(
             bool(row["visible"]) and not bool(row["masked"])
@@ -1476,13 +2028,32 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             JOIN roles r ON r.role_id=ur.role_id AND r.status='ACTIVE'
             JOIN legacy_role_data_scope_grants scope
               ON scope.role_id=ur.role_id
-            WHERE ur.user_id=%s
+            WHERE ur.user_id=%s AND r.tenant_id=%s
               AND ur.effective_from<=NOW()
               AND (ur.effective_to IS NULL OR ur.effective_to>NOW())
             GROUP BY scope.nav_id
             ORDER BY scope.nav_id
             """,
-            (user["user_id"],),
+            (user["user_id"], user["tenant_id"]),
+        )
+        user["data_scopes"] = execute_all(
+            connection,
+            """
+            SELECT rds.module_code AS moduleCode,
+                   rds.scope_type AS scopeType,
+                   MAX(rds.allow_cross_store) AS allowCrossStore,
+                   MAX(rds.allow_cross_department) AS allowCrossDepartment
+            FROM user_roles ur
+            JOIN roles r ON r.role_id=ur.role_id
+              AND r.tenant_id=%s AND r.status='ACTIVE'
+            JOIN role_data_scopes rds ON rds.role_id=r.role_id
+            WHERE ur.user_id=%s
+              AND ur.effective_from<=NOW()
+              AND (ur.effective_to IS NULL OR ur.effective_to>NOW())
+            GROUP BY rds.module_code, rds.scope_type
+            ORDER BY rds.module_code, rds.scope_type
+            """,
+            (user["tenant_id"], user["user_id"]),
         )
         return user
 
@@ -1491,8 +2062,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         if user["staff_id"]:
             staff = execute_one(
                 connection,
-                "SELECT name FROM staff WHERE staff_id=%s",
-                (user["staff_id"],),
+                "SELECT name FROM staff WHERE staff_id=%s AND tenant_id=%s",
+                (user["staff_id"], user["tenant_id"]),
             )
             if staff and staff["name"]:
                 display_name = staff["name"]
@@ -1508,27 +2079,49 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 "storeIds": user["store_ids"],
                 "departmentId": user.get("department_id"),
                 "mustChangePassword": bool(user.get("must_change_password")),
+                "dataScopes": user.get("data_scopes", []),
                 "legacyDataScopes": user.get("legacy_data_scopes", []),
             }
         )
 
     def _allowed_store(self, user: dict, store_id) -> int:
         try:
-            normalized = int(store_id)
-        except (TypeError, ValueError) as exc:
-            raise ApiError("请选择门店") from exc
-        if normalized not in user["store_ids"] and "SYS_ADMIN" not in user["roles"]:
-            raise ApiError("无权访问该门店", 403, 40300)
-        return normalized
+            return allowed_store_id(user, store_id)
+        except RuntimeConfigError as exc:
+            status = 403 if "无权" in str(exc) else 400
+            raise ApiError(str(exc), status, 40300 if status == 403 else 40000) from exc
+
+    def _user_for_selected_store(self, user: dict, query: dict) -> dict:
+        """Narrow read scope to the current store; `all` is admin aggregate-only."""
+        selected = str((query or {}).get("storeId") or "").strip()
+        if not selected:
+            return user
+        if selected.lower() == "all":
+            if "SYS_ADMIN" not in user.get("roles", []):
+                raise ApiError("普通账号不能查询全部门店数据", 403, 40300)
+            return user
+        store_id = self._allowed_store(user, selected)
+        scoped_user = dict(user)
+        scoped_user["store_ids"] = [store_id]
+        scoped_user["default_store_id"] = store_id
+        return scoped_user
+
+    def _require_selected_write_store(
+        self, user: dict, body: dict, actual_store_id: int | None = None
+    ) -> int | None:
+        """Do not allow a write from the aggregate view or into another store."""
+        selected = str((body or {}).get("selectedStoreId") or "").strip()
+        if not selected:
+            return None
+        if selected.lower() == "all":
+            raise ApiError("全部门店仅支持汇总查询，请先选择具体门店再保存", 400, 40000)
+        selected_id = self._allowed_store(user, selected)
+        if actual_store_id is not None and selected_id != int(actual_store_id):
+            raise ApiError("保存数据的所属门店必须与当前选中门店一致", 400, 40000)
+        return selected_id
 
     def _store_clause(self, user: dict, alias: str = "") -> tuple[str, list]:
-        if "SYS_ADMIN" in user["roles"]:
-            return "1=1", []
-        if not user["store_ids"]:
-            return "1=0", []
-        column = f"{alias}.store_id" if alias else "store_id"
-        placeholders = ",".join(["%s"] * len(user["store_ids"]))
-        return f"{column} IN ({placeholders})", list(user["store_ids"])
+        return store_scope_clause(user, alias)
 
     def _has_permission(self, user: dict, permission: str) -> bool:
         return permission in user["permissions"]
@@ -1563,9 +2156,27 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         button_id = button_map.get(normalized)
         if button_id is None:
             raise ApiError("当前页面没有此操作", 403, 40300)
+        standard_permission = {
+            "添加": "RECOVERY.CREATE",
+            "服务预约": "RECOVERY.CREATE",
+            "编辑": "RECOVERY.UPDATE",
+            "批量修改": "RECOVERY.UPDATE",
+            "删除": "RECOVERY.UPDATE",
+            "打印": "RECOVERY.PRINT",
+            "设置": "RECOVERY.UPDATE",
+            "读卡": "RECOVERY.VIEW",
+            "确认完成": "RECOVERY.EXECUTE",
+            "取消": "RECOVERY.EXECUTE",
+            "预约确认": "RECOVERY.EXECUTE",
+            "审核": "RECOVERY.EXECUTE",
+            "反审核": "RECOVERY.EXECUTE",
+        }.get(normalized)
+        accepted_permissions = [f"LEGACY.WEB.N{nav_id}.B{button_id}"]
+        if standard_permission:
+            accepted_permissions.append(standard_permission)
         self._require_any_permission(
             user,
-            (f"LEGACY.WEB.N{nav_id}.B{button_id}",),
+            tuple(accepted_permissions),
         )
 
     def _require_finance_access(
@@ -1590,9 +2201,30 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         button_id = FINANCE_ACTION_BUTTON_IDS.get(resource, {}).get(normalized)
         if button_id is None:
             raise ApiError("当前财务页面没有此操作", 403, 40300)
+        standard_permission = {
+            "前往新增收款": "FINANCE.CREATE",
+            "添加": "FINANCE.CREATE",
+            "编辑": "FINANCE.UPDATE",
+            "删除": "FINANCE.UPDATE",
+            "导出": "FINANCE.PRINT",
+            "打印": "FINANCE.PRINT",
+            "提交": "FINANCE.UPDATE",
+            "审核": "FINANCE.APPROVE",
+            "批量审核": "FINANCE.APPROVE",
+            "反审核": "FINANCE.APPROVE",
+            "流程审批": "FINANCE.APPROVE",
+            "确认匹配": "FINANCE.APPROVE",
+            "取消匹配": "FINANCE.APPROVE",
+            "登记退款打款": "FINANCE.APPROVE",
+            "登记真实发票": "FINANCE.UPDATE",
+            "撤回": "FINANCE.UPDATE",
+        }.get(normalized)
+        accepted_permissions = [f"LEGACY.WEB.N{nav_id}.B{button_id}"]
+        if standard_permission:
+            accepted_permissions.append(standard_permission)
         self._require_any_permission(
             user,
-            (f"LEGACY.WEB.N{nav_id}.B{button_id}",),
+            tuple(accepted_permissions),
         )
 
     def _require_room_access(
@@ -1611,9 +2243,40 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         button_id = ROOM_ACTION_BUTTON_IDS.get(resource, {}).get(normalized)
         if button_id is None:
             raise ApiError("当前客房页面没有此操作", 403, 40300)
+        standard_permission = {
+            "添加": "ROOM.CREATE",
+            "订房": "ROOM.CREATE",
+            "房型订房": "ROOM.CREATE",
+            "跨店订房": "ROOM.CREATE",
+            "编辑": "ROOM.UPDATE",
+            "删除": "ROOM.UPDATE",
+            "打印": "ROOM.PRINT",
+            "导出": "ROOM.PRINT",
+            "入住": "ROOM.EXECUTE",
+            "续住": "ROOM.EXECUTE",
+            "换房": "ROOM.EXECUTE",
+            "跨店换房": "ROOM.EXECUTE",
+            "退房": "ROOM.EXECUTE",
+            "结账": "ROOM.EXECUTE",
+            "取消": "ROOM.EXECUTE",
+            "退订": "ROOM.EXECUTE",
+            "退订并结账": "ROOM.EXECUTE",
+            "确认完成": "ROOM.EXECUTE",
+            "预约确认": "ROOM.EXECUTE",
+            "确认签收": "ROOM.EXECUTE",
+            "确定已返回": "ROOM.EXECUTE",
+            "物品发放": "ROOM.EXECUTE",
+            "维修/脏房": "ROOM.EXECUTE",
+            "客房服务申请": "ROOM.EXECUTE",
+            "服务预约": "ROOM.EXECUTE",
+            "入住通知单": "ROOM.PRINT",
+        }.get(normalized)
+        accepted_permissions = [f"LEGACY.WEB.N{nav_id}.B{button_id}"]
+        if standard_permission:
+            accepted_permissions.append(standard_permission)
         self._require_any_permission(
             user,
-            (f"LEGACY.WEB.N{nav_id}.B{button_id}",),
+            tuple(accepted_permissions),
         )
 
     def _require_sales_access(
@@ -1625,7 +2288,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         if action is None:
             self._require_any_permission(
                 user,
-                (f"LEGACY.WEB.N{nav_id}.B18",),
+                (f"LEGACY.WEB.N{nav_id}.B18", "SALES.VIEW"),
             )
             return
         normalized = re.sub(r"\s+", "", str(action))
@@ -1639,13 +2302,63 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             if isinstance(button_id_or_code, str)
             else f"LEGACY.WEB.N{nav_id}.B{button_id_or_code}"
         )
+        standard_permission = {
+            "添加": "SALES.CREATE",
+            "编辑": "SALES.UPDATE",
+            "删除": "SALES.UPDATE",
+            "设置": "SALES.UPDATE",
+            "复制": "SALES.UPDATE",
+            "启用": "SALES.UPDATE",
+            "停用": "SALES.UPDATE",
+            "屏蔽/取消": "SALES.UPDATE",
+            "推荐/取消": "SALES.UPDATE",
+            "提交": "SALES.UPDATE",
+            "取消": "SALES.UPDATE",
+            "撤回": "SALES.UPDATE",
+            "变更": "SALES.UPDATE",
+            "导出": "SALES.EXPORT",
+            "打印": "SALES.PRINT",
+            "审核": "SALES.APPROVE",
+            "反审核": "SALES.APPROVE",
+            "流程审批": "SALES.APPROVE",
+            "折扣率审核": "SALES.APPROVE",
+            "远程签约": "SALES.UPDATE",
+            "套餐升级": "SALES.UPDATE",
+            "星支付": "SALES.UPDATE",
+            "收款": "SALES.UPDATE",
+            "出库": "SALES.UPDATE",
+            "退货": "SALES.UPDATE",
+            "取消退货": "SALES.UPDATE",
+            "服务销售": "SALES.UPDATE",
+            "物料销售": "SALES.UPDATE",
+            "卡类销售": "SALES.UPDATE",
+            "是否启用": "SALES.UPDATE",
+            "介绍分配": "SALES.UPDATE",
+            "分发": "SALES.UPDATE",
+        }.get(normalized)
+        accepted_permissions = [permission_code]
+        if standard_permission and standard_permission != permission_code:
+            accepted_permissions.append(standard_permission)
         self._require_any_permission(
             user,
-            (permission_code,),
+            tuple(accepted_permissions),
         )
 
     def _finance_store_id(self, connection, user: dict, body: dict) -> int:
-        return self._recovery_store_id(connection, user, body)
+        raw = body.get("storeId")
+        if raw in (None, "", "all"):
+            raise ApiError("请先选择具体门店；全部门店仅支持汇总查询")
+        return self._allowed_store(user, raw)
+
+    def _finance_current_store_user(self, user: dict, query: dict) -> dict:
+        raw = query.get("storeId")
+        if raw in (None, ""):
+            raise ApiError("请先选择具体门店查看业务明细；全部门店仅支持汇总查询")
+        # Administrators may inspect the aggregate read view.  Write helpers
+        # still reject ``all`` through ``_require_selected_write_store`` /
+        # ``_finance_store_id``, so this broadens reads without broadening
+        # mutation scope.
+        return self._user_for_selected_store(user, query)
 
     def _finance_store_options(self, connection, user: dict) -> list:
         clause, params = self._store_clause(user, "s")
@@ -1662,6 +2375,674 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             [user["tenant_id"], *params],
         )
 
+    def _require_asset_view(self, user: dict):
+        self._require_any_permission(
+            user,
+            (
+                "CUSTOMER.VIEW",
+                "FINANCE.VIEW",
+                "FINANCE.CREATE",
+                "LEGACY.WEB.N90.B18",
+            ),
+        )
+
+    def _get_asset_resource(
+        self, connection, user: dict, resource: str, query: dict
+    ):
+        self._require_asset_view(user)
+        scoped_user = self._finance_current_store_user(user, query)
+        if resource == "/cards/options":
+            return self._success(
+                {"customers": self._asset_card_customer_options(connection, user)}
+            )
+        if resource == "/cards":
+            rows = self._asset_card_rows(connection, scoped_user)
+            return self._success({"list": rows, "total": len(rows)})
+        clause, params = self._store_clause(scoped_user, "c")
+        if resource == "/overview":
+            row = execute_one(
+                connection,
+                f"""
+                SELECT COUNT(*) AS accountCount,
+                       COALESCE(SUM(mw.stored_card_balance),0)
+                         AS accountBalance
+                FROM customers c
+                LEFT JOIN member_wallet mw
+                  ON mw.customer_id=c.customer_id
+                 AND mw.tenant_id=c.tenant_id
+                WHERE c.tenant_id=%s
+                  AND c.deleted_at IS NULL
+                  AND {clause}
+                """,
+                [user["tenant_id"], *params],
+            ) or {}
+            return self._success(
+                {
+                    "accountCount": int(row.get("accountCount") or 0),
+                    "accountBalance": row.get("accountBalance") or 0,
+                }
+            )
+        if resource != "/accounts":
+            raise ApiError("会员资产资源不存在", 404, 40400)
+        rows = execute_all(
+            connection,
+            f"""
+            SELECT c.customer_id AS id,
+                   CONCAT('HY',LPAD(c.customer_id,10,'0')) AS account_no,
+                   c.name AS customer_name,
+                   c.phone AS mobile,
+                   s.name AS store_name,
+                   COALESCE(mw.stored_card_balance,0) AS balance,
+                   0 AS frozen_amount,
+                   COALESCE(mw.points,0) AS points,
+                   '正常' AS status
+            FROM customers c
+            JOIN stores s ON s.store_id=c.store_id
+            LEFT JOIN member_wallet mw
+              ON mw.customer_id=c.customer_id
+             AND mw.tenant_id=c.tenant_id
+            WHERE c.tenant_id=%s
+              AND c.deleted_at IS NULL
+              AND {clause}
+            ORDER BY c.customer_id DESC
+            LIMIT 1000
+            """,
+            [user["tenant_id"], *params],
+        )
+        for row in rows:
+            row["mobile"] = self._masked_phone(user, row.get("mobile"))
+        return self._success({"list": rows, "total": len(rows)})
+
+    def _post_asset_resource(
+        self, connection, user: dict, resource: str, body: dict
+    ):
+        if resource == "/cards":
+            return self._create_asset_count_card(connection, user, body)
+        card_action = re.fullmatch(
+            r"/cards/(\d+)/(activate|consume|deactivate)", resource
+        )
+        if card_action:
+            return self._perform_asset_count_card_action(
+                connection,
+                user,
+                int(card_action.group(1)),
+                card_action.group(2),
+                body,
+            )
+        match = re.fullmatch(
+            r"/accounts/(\d+)/(top-up|deduct)", resource
+        )
+        if not match:
+            raise ApiError("会员资产写操作不存在", 404, 40400)
+        self._require_any_permission(
+            user,
+            ("FINANCE.CREATE", "LEGACY.WEB.N90.B1"),
+        )
+        customer_id = int(match.group(1))
+        action = match.group(2)
+        transaction_store_id = self._finance_store_id(connection, user, body)
+        amount = self._finance_positive_amount(body, "amount")
+        if amount > Decimal("1000000"):
+            raise ApiError("单笔余额变动不能超过1000000元")
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT c.customer_id,c.store_id,
+                       COALESCE(mw.stored_card_balance,0) AS balance
+                FROM customers c
+                LEFT JOIN member_wallet mw
+                  ON mw.customer_id=c.customer_id
+                 AND mw.tenant_id=c.tenant_id
+                WHERE c.customer_id=%s AND c.tenant_id=%s
+                  AND c.deleted_at IS NULL
+                FOR UPDATE
+                """,
+                [customer_id, user["tenant_id"]],
+            )
+            account = cursor.fetchone()
+            if not account:
+                raise ApiError("会员账户不存在或无权访问", 404, 40400)
+            before = Decimal(str(account.get("balance") or 0))
+            delta = amount if action == "top-up" else -amount
+            after = before + delta
+            if after < 0:
+                raise ApiError("会员余额不足，不能扣款")
+            cursor.execute(
+                """
+                INSERT INTO member_wallet(
+                  customer_id,tenant_id,stored_card_balance,points,version
+                ) VALUES (%s,%s,%s,0,1)
+                ON DUPLICATE KEY UPDATE
+                  stored_card_balance=VALUES(stored_card_balance),
+                  version=version+1
+                """,
+                (customer_id, user["tenant_id"], after),
+            )
+            cursor.execute(
+                """
+                INSERT INTO wallet_ledger(
+                  tenant_id,store_id,customer_id,delta,balance_after,reason,
+                  payment_method,ref_order,operator_user_id,created_at
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                """,
+                (
+                    user["tenant_id"],
+                    transaction_store_id,
+                    customer_id,
+                    delta,
+                    after,
+                    "ERP手工充值" if action == "top-up" else "ERP手工扣款",
+                    "线下登记",
+                    self._finance_number(
+                        "CZ" if action == "top-up" else "KK"
+                    ),
+                    user["user_id"],
+                ),
+            )
+        self._audit(
+            connection,
+            user,
+            "member_wallet",
+            customer_id,
+            "top_up" if action == "top-up" else "deduct",
+            transaction_store_id,
+            str(before),
+            str(after),
+            {"amount": str(amount), "source": "ERP_MANUAL"},
+        )
+        connection.commit()
+        return self._success(
+            {
+                "id": customer_id,
+                "balance": after,
+                "status": "正常",
+            }
+        )
+
+    def _asset_card_customer_options(self, connection, user: dict) -> list:
+        rows = execute_all(
+            connection,
+            f"""
+            SELECT c.customer_id AS id,c.name,c.phone,c.store_id,
+                   s.name AS storeName
+            FROM customers c
+            JOIN stores s ON s.store_id=c.store_id
+            WHERE c.tenant_id=%s AND c.deleted_at IS NULL
+            ORDER BY c.customer_id DESC
+            LIMIT 1000
+            """,
+            [user["tenant_id"]],
+        )
+        for row in rows:
+            row["phone"] = self._masked_phone(user, row.get("phone"))
+        return rows
+
+    def _asset_card_rows(self, connection, user: dict) -> list:
+        clause, params = self._store_clause(user, "card")
+        return execute_all(
+            connection,
+            f"""
+            SELECT card.card_id AS id,ext.card_no AS cardNo,
+                   card.name AS cardName,c.name AS customerName,
+                   s.name AS store,card.total_count AS totalCount,
+                   card.remain_count AS remainingCount,
+                   card.valid_end AS validTo,
+                   CASE
+                     WHEN ext.lifecycle_status='正常'
+                      AND DATE(card.valid_end)<CURDATE() THEN '已过期'
+                     ELSE ext.lifecycle_status
+                   END AS status,
+                   receipt.receipt_no AS receiptNo,
+                   card.created_at AS createdAt
+            FROM count_cards card
+            JOIN erp_count_card_extensions ext ON ext.card_id=card.card_id
+            JOIN customers c ON c.customer_id=card.customer_id
+            JOIN stores s ON s.store_id=card.store_id
+            JOIN finance_receipts receipt ON receipt.receipt_id=ext.receipt_id
+            WHERE card.tenant_id=%s AND card.deleted_at IS NULL
+              AND {clause}
+            ORDER BY card.card_id DESC
+            LIMIT 1000
+            """,
+            [user["tenant_id"], *params],
+        )
+
+    def _require_asset_write(self, user: dict):
+        self._require_any_permission(
+            user, ("FINANCE.CREATE", "LEGACY.WEB.N90.B1")
+        )
+
+    def _create_asset_count_card(
+        self, connection, user: dict, body: dict
+    ):
+        self._require_asset_write(user)
+        try:
+            customer_id = int(body.get("customerId") or 0)
+            total_count = int(body.get("totalCount") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ApiError("客户或卡次数格式不正确") from exc
+        if not customer_id or not 1 <= total_count <= 10000:
+            raise ApiError("卡次数须在1至10000之间")
+        card_name = str(body.get("cardName") or "").strip()
+        receipt_no = str(body.get("receiptNo") or "").strip()
+        valid_to = str(body.get("validTo") or "")[:10]
+        if not 2 <= len(card_name) <= 100:
+            raise ApiError("卡名称须为2至100个字符")
+        if not receipt_no or len(receipt_no) > 128:
+            raise ApiError("必须填写有效的线下收款单号")
+        try:
+            valid_date = date.fromisoformat(valid_to)
+        except ValueError as exc:
+            raise ApiError("有效期格式不正确") from exc
+        if valid_date < date.today():
+            raise ApiError("有效期不能早于今天")
+        transaction_store_id = self._finance_store_id(connection, user, body)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT c.customer_id,c.store_id
+                FROM customers c
+                WHERE c.customer_id=%s AND c.tenant_id=%s
+                  AND c.deleted_at IS NULL
+                FOR UPDATE
+                """,
+                [customer_id, user["tenant_id"]],
+            )
+            customer = cursor.fetchone()
+            if not customer:
+                raise ApiError("客户不存在或无权访问", 404, 40400)
+            cursor.execute(
+                """
+                SELECT receipt_id,amount FROM finance_receipts
+                WHERE tenant_id=%s AND store_id=%s AND customer_id=%s
+                  AND receipt_no=%s AND status IN ('审核通过','已审核')
+                FOR UPDATE
+                """,
+                (
+                    user["tenant_id"],
+                    transaction_store_id,
+                    customer_id,
+                    receipt_no,
+                ),
+            )
+            receipt = cursor.fetchone()
+            if not receipt:
+                raise ApiError("收款单不存在、未审核或不属于该客户门店")
+            cursor.execute(
+                """
+                SELECT card_id FROM erp_count_card_extensions
+                WHERE receipt_id=%s
+                """,
+                (receipt["receipt_id"],),
+            )
+            if cursor.fetchone():
+                raise ApiError("该收款单已绑定套餐卡，不能重复发卡")
+            card_no = self._finance_number("CK")
+            cursor.execute(
+                """
+                INSERT INTO count_cards(
+                  tenant_id,store_id,customer_id,name,total_count,used_count,
+                  remain_count,valid_start,valid_end,total_amount,unit_price,
+                  status,version,created_at
+                ) VALUES (%s,%s,%s,%s,%s,0,%s,CURDATE(),%s,%s,%s,'待启用',0,NOW())
+                """,
+                (
+                    user["tenant_id"],
+                    transaction_store_id,
+                    customer_id,
+                    card_name,
+                    total_count,
+                    total_count,
+                    valid_to,
+                    receipt["amount"],
+                    Decimal(str(receipt["amount"] or 0)) / total_count,
+                ),
+            )
+            card_id = cursor.lastrowid
+            cursor.execute(
+                """
+                INSERT INTO erp_count_card_extensions(
+                  card_id,tenant_id,store_id,card_no,receipt_id,
+                  lifecycle_status,created_by_user_id
+                ) VALUES (%s,%s,%s,%s,%s,'待启用',%s)
+                """,
+                (
+                    card_id,
+                    user["tenant_id"],
+                    transaction_store_id,
+                    card_no,
+                    receipt["receipt_id"],
+                    user["user_id"],
+                ),
+            )
+        self._audit(
+            connection,
+            user,
+            "count_card",
+            card_id,
+            "create",
+            transaction_store_id,
+            None,
+            "待启用",
+            {"receiptNo": receipt_no, "totalCount": total_count},
+        )
+        connection.commit()
+        return self._success(
+            {"id": card_id, "cardNo": card_no, "status": "待启用"}
+        )
+
+    def _perform_asset_count_card_action(
+        self,
+        connection,
+        user: dict,
+        card_id: int,
+        action: str,
+        body: dict,
+    ):
+        self._require_asset_write(user)
+        transaction_store_id = self._finance_store_id(connection, user, body)
+        clause, params = self._store_clause(user, "card")
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT card.card_id,card.store_id,card.total_count,
+                       card.used_count,card.remain_count,card.valid_end,
+                       ext.lifecycle_status
+                FROM count_cards card
+                JOIN erp_count_card_extensions ext ON ext.card_id=card.card_id
+                WHERE card.card_id=%s AND card.tenant_id=%s
+                  AND card.deleted_at IS NULL AND {clause}
+                FOR UPDATE
+                """,
+                [card_id, user["tenant_id"], *params],
+            )
+            card = cursor.fetchone()
+            if not card:
+                raise ApiError("套餐卡不存在或无权访问", 404, 40400)
+            if int(card["store_id"]) != transaction_store_id:
+                raise ApiError("套餐卡不属于当前选中门店", 404, 40400)
+            before = card["lifecycle_status"]
+            valid_to = date.fromisoformat(str(card["valid_end"])[:10])
+            after = before
+            if action == "activate":
+                if before != "待启用":
+                    raise ApiError("只有待启用的套餐卡可以启用")
+                if valid_to < date.today():
+                    raise ApiError("已过期套餐卡不能启用")
+                after = "正常"
+                cursor.execute(
+                    """
+                    UPDATE erp_count_card_extensions
+                    SET lifecycle_status=%s,activated_by_user_id=%s,
+                        activated_at=NOW()
+                    WHERE card_id=%s
+                    """,
+                    (after, user["user_id"], card_id),
+                )
+                cursor.execute(
+                    "UPDATE count_cards SET status='生效' WHERE card_id=%s",
+                    (card_id,),
+                )
+            elif action == "consume":
+                if before != "正常":
+                    raise ApiError("只有正常状态的套餐卡可以核销")
+                if valid_to < date.today():
+                    raise ApiError("套餐卡已过期，不能核销")
+                try:
+                    count = int(body.get("count") or 1)
+                except (TypeError, ValueError) as exc:
+                    raise ApiError("核销次数格式不正确") from exc
+                if not 1 <= count <= int(card["remain_count"] or 0):
+                    raise ApiError("核销次数不能超过剩余次数")
+                remaining = int(card["remain_count"]) - count
+                after = "已耗尽" if remaining == 0 else "正常"
+                cursor.execute(
+                    """
+                    UPDATE count_cards
+                    SET used_count=used_count+%s,remain_count=%s,
+                        status=%s,version=version+1
+                    WHERE card_id=%s
+                    """,
+                    (
+                        count,
+                        remaining,
+                        "已耗尽" if remaining == 0 else "生效",
+                        card_id,
+                    ),
+                )
+                cursor.execute(
+                    """
+                    UPDATE erp_count_card_extensions
+                    SET lifecycle_status=%s WHERE card_id=%s
+                    """,
+                    (after, card_id),
+                )
+                cursor.execute(
+                    """
+                    INSERT INTO count_card_logs(
+                      tenant_id,card_id,change_count,after_remain,amount,
+                      biz_ref,operator_id,remark,created_at
+                    ) VALUES (%s,%s,%s,%s,0,%s,%s,%s,NOW())
+                    """,
+                    (
+                        user["tenant_id"],
+                        card_id,
+                        -count,
+                        remaining,
+                        self._finance_number("HX"),
+                        user["user_id"],
+                        "ERP套餐卡核销",
+                    ),
+                )
+            else:
+                if before not in {"待启用", "正常"}:
+                    raise ApiError("当前状态不能停用套餐卡")
+                after = "已停用"
+                cursor.execute(
+                    """
+                    UPDATE erp_count_card_extensions
+                    SET lifecycle_status=%s,deactivated_by_user_id=%s,
+                        deactivated_at=NOW()
+                    WHERE card_id=%s
+                    """,
+                    (after, user["user_id"], card_id),
+                )
+                cursor.execute(
+                    "UPDATE count_cards SET status='已停用' WHERE card_id=%s",
+                    (card_id,),
+                )
+        self._audit(
+            connection,
+            user,
+            "count_card",
+            card_id,
+            action,
+            int(card["store_id"]),
+            before,
+            after,
+            {},
+        )
+        connection.commit()
+        return self._success({"id": card_id, "status": after})
+
+    def _require_contract_archive_view(self, user: dict):
+        self._require_any_permission(user, ("LEGACY.WEB.N85.B18",))
+
+    def _require_contract_archive_write(self, user: dict):
+        self._require_any_permission(user, ("LEGACY.WEB.N85.B10",))
+
+    def _get_contract_archive_resource(
+        self, connection, user: dict, resource: str, query: dict
+    ):
+        if resource != "/":
+            raise ApiError("合同归档资源不存在", 404, 40400)
+        self._require_contract_archive_view(user)
+        scoped_user = self._finance_current_store_user(user, query)
+        clause, params = self._store_clause(scoped_user, "contract")
+        rows = execute_all(
+            connection,
+            f"""
+            SELECT contract.contract_id AS id,contract.contract_no AS contractNo,
+                   customer.name AS customerName,s.name AS store,
+                   contract.status AS contractStatus,
+                   COALESCE(archive.archive_status,'待线下归档')
+                     AS archiveStatus,
+                   CASE
+                     WHEN archive.archive_id IS NULL THEN '未接入（不伪造）'
+                     ELSE '未接入；仅登记线下归档'
+                   END AS electronicSignStatus,
+                   archive.archive_no AS archiveNo,
+                   archive.signing_mode AS signingMode,
+                   archive.signed_at AS signedAt,
+                   archive.archive_reference AS archiveReference,
+                   archive.original_location AS originalLocation,
+                   archive.void_reason AS voidReason,
+                   archive.archived_at AS archivedAt
+            FROM contracts contract
+            JOIN customers customer ON customer.customer_id=contract.customer_id
+            JOIN stores s ON s.store_id=contract.store_id
+            LEFT JOIN sales_contract_sign_archives archive
+              ON archive.contract_id=contract.contract_id
+            WHERE contract.tenant_id=%s AND contract.deleted_at IS NULL
+              AND {clause}
+            ORDER BY contract.contract_id DESC
+            LIMIT 1000
+            """,
+            [user["tenant_id"], *params],
+        )
+        return self._success({"list": rows, "total": len(rows)})
+
+    def _post_contract_archive_resource(
+        self, connection, user: dict, resource: str, body: dict
+    ):
+        match = re.fullmatch(r"/(\d+)/(archive|revoke)", resource)
+        if not match:
+            raise ApiError("合同归档写操作不存在", 404, 40400)
+        self._require_contract_archive_write(user)
+        selected_store_id = self._finance_store_id(connection, user, body)
+        contract_id = int(match.group(1))
+        action = match.group(2)
+        scoped_user = dict(user)
+        scoped_user["store_ids"] = [selected_store_id]
+        clause, params = self._store_clause(scoped_user, "contract")
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT contract.contract_id,contract.store_id,contract.status,
+                       archive.archive_id,archive.archive_status
+                FROM contracts contract
+                LEFT JOIN sales_contract_sign_archives archive
+                  ON archive.contract_id=contract.contract_id
+                WHERE contract.contract_id=%s AND contract.tenant_id=%s
+                  AND contract.deleted_at IS NULL AND {clause}
+                FOR UPDATE
+                """,
+                [contract_id, user["tenant_id"], *params],
+            )
+            contract = cursor.fetchone()
+            if not contract:
+                raise ApiError("合同不存在或无权访问", 404, 40400)
+            before = contract.get("archive_status") or "待线下归档"
+            if action == "archive":
+                if contract["status"] not in {"已审核", "审核通过"}:
+                    raise ApiError("只有已审核合同可以登记签署归档")
+                archive_reference = str(
+                    body.get("archiveReference") or ""
+                ).strip()
+                original_location = str(
+                    body.get("originalLocation") or ""
+                ).strip()
+                signed_at = str(body.get("signedAt") or "")[:10]
+                if not 2 <= len(archive_reference) <= 128:
+                    raise ApiError("请填写2至128个字符的线下归档编号")
+                if not 2 <= len(original_location) <= 255:
+                    raise ApiError("请填写2至255个字符的纸质原件存放位置")
+                try:
+                    signed_date = date.fromisoformat(signed_at)
+                except ValueError as exc:
+                    raise ApiError("签署日期格式不正确") from exc
+                if signed_date > date.today():
+                    raise ApiError("签署日期不能晚于今天")
+                if contract["archive_id"] and before != "已作废":
+                    raise ApiError("该合同已登记线下归档，不能重复登记")
+                after = "线下已归档"
+                if contract["archive_id"]:
+                    archive_id = int(contract["archive_id"])
+                    cursor.execute(
+                        """
+                        UPDATE sales_contract_sign_archives
+                        SET archive_status=%s,signing_mode='线下纸质签署',
+                            signed_at=%s,archive_reference=%s,
+                            original_location=%s,void_reason=NULL,
+                            archived_by_user_id=%s,archived_at=NOW(),
+                            voided_by_user_id=NULL,voided_at=NULL
+                        WHERE archive_id=%s
+                        """,
+                        (
+                            after,
+                            signed_at,
+                            archive_reference,
+                            original_location,
+                            user["user_id"],
+                            archive_id,
+                        ),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        INSERT INTO sales_contract_sign_archives(
+                          tenant_id,store_id,contract_id,archive_no,
+                          archive_status,signing_mode,signed_at,
+                          archive_reference,original_location,
+                          archived_by_user_id
+                        ) VALUES (%s,%s,%s,%s,%s,'线下纸质签署',%s,%s,%s,%s)
+                        """,
+                        (
+                            user["tenant_id"],
+                            contract["store_id"],
+                            contract_id,
+                            self._sales_number("DZA"),
+                            after,
+                            signed_at,
+                            archive_reference,
+                            original_location,
+                            user["user_id"],
+                        ),
+                    )
+                    archive_id = cursor.lastrowid
+            else:
+                if before != "线下已归档":
+                    raise ApiError("只有线下已归档合同可以作废归档")
+                reason = str(body.get("reason") or "").strip()
+                if not 2 <= len(reason) <= 500:
+                    raise ApiError("作废原因须为2至500个字符")
+                after = "已作废"
+                archive_id = int(contract["archive_id"])
+                cursor.execute(
+                    """
+                    UPDATE sales_contract_sign_archives
+                    SET archive_status=%s,void_reason=%s,
+                        voided_by_user_id=%s,voided_at=NOW()
+                    WHERE archive_id=%s
+                    """,
+                    (after, reason, user["user_id"], archive_id),
+                )
+        self._audit(
+            connection,
+            user,
+            "contract_sign_archive",
+            archive_id,
+            action,
+            int(contract["store_id"]),
+            before,
+            after,
+            {"contractId": contract_id},
+        )
+        connection.commit()
+        return self._success(
+            {"id": archive_id, "contractId": contract_id, "status": after}
+        )
+
     def _get_finance_resource(
         self, connection, user: dict, resource: str, query: dict
     ):
@@ -1672,15 +3053,20 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             return self._success(
                 {"stores": self._finance_store_options(connection, user)}
             )
-        picker = re.fullmatch(r"/pickers/(employee|customer)", resource)
+        picker = re.fullmatch(
+            r"/pickers/(employee|customer|contract)", resource
+        )
         if picker:
-            return self._get_finance_picker(connection, user, picker.group(1))
+            return self._get_finance_picker(
+                connection, user, picker.group(1), query
+            )
         module = re.fullmatch(r"/modules/([^/]+)", resource)
         if not module:
             raise ApiError("财务资源不存在", 404, 40400)
         key = module.group(1)
         self._require_finance_access(user, key)
-        rows = self._finance_module_rows(connection, user, key, query)
+        scoped_user = self._finance_current_store_user(user, query)
+        rows = self._finance_module_rows(connection, scoped_user, key, query)
         return self._success(
             {
                 "list": rows,
@@ -1690,7 +3076,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         )
 
     def _get_finance_picker(
-        self, connection, user: dict, picker_type: str
+        self, connection, user: dict, picker_type: str, query: dict
     ):
         self._require_any_permission(
             user,
@@ -1700,8 +3086,49 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 "LEGACY.WEB.N521.B18",
             ),
         )
+        scoped_user = self._finance_current_store_user(user, query)
+        if picker_type == "contract":
+            clause, params = self._store_clause(scoped_user, "ct")
+            rows = execute_all(
+                connection,
+                f"""
+                SELECT ct.contract_id AS id,ct.customer_id AS customerId,
+                       ct.contract_no AS contractNo,c.name AS customerName,
+                       c.phone AS mobile,s.name AS store,ct.amount,
+                       COALESCE(SUM(
+                         CASE WHEN fr.status<>'已删除'
+                           THEN fr.amount ELSE 0 END
+                       ),0) AS paid,
+                       GREATEST(
+                         ct.amount-COALESCE(SUM(
+                           CASE WHEN fr.status<>'已删除'
+                             THEN fr.amount ELSE 0 END
+                         ),0),
+                         0
+                       ) AS balance,
+                       ct.status
+                FROM contracts ct
+                JOIN customers c ON c.customer_id=ct.customer_id
+                JOIN stores s ON s.store_id=ct.store_id
+                LEFT JOIN finance_receipts fr
+                  ON fr.contract_id=ct.contract_id
+                WHERE ct.tenant_id=%s AND ct.deleted_at IS NULL
+                  AND ct.status IN ('已审核','审核通过')
+                  AND {clause}
+                GROUP BY ct.contract_id
+                HAVING balance>0
+                ORDER BY ct.contract_id DESC
+                LIMIT 1000
+                """,
+                [user["tenant_id"], *params],
+            )
+            for row in rows:
+                row["mobile"] = self._masked_phone(
+                    user, row.get("mobile")
+                )
+            return self._success({"list": rows, "total": len(rows)})
+
         if picker_type == "customer":
-            clause, params = self._store_clause(user, "c")
             rows = execute_all(
                 connection,
                 f"""
@@ -1714,25 +3141,23 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                   ON ca.customer_id=c.customer_id
                 LEFT JOIN staff owner ON owner.staff_id=c.sales_staff_id
                 LEFT JOIN stores s ON s.store_id=c.store_id
-                WHERE c.tenant_id=%s AND c.deleted_at IS NULL AND {clause}
+                WHERE c.tenant_id=%s AND c.deleted_at IS NULL
                 ORDER BY c.customer_id DESC
                 LIMIT 1000
                 """,
-                [user["tenant_id"], *params],
+                [user["tenant_id"]],
             )
             for row in rows:
                 row["mobile"] = self._masked_phone(user, row.get("mobile"))
             return self._success({"list": rows, "total": len(rows)})
 
-        if "SYS_ADMIN" in user["roles"]:
-            scope_sql, scope_params = "1=1", []
-        elif user["store_ids"]:
-            placeholders = ",".join(["%s"] * len(user["store_ids"]))
+        if scoped_user["store_ids"]:
+            placeholders = ",".join(["%s"] * len(scoped_user["store_ids"]))
             scope_sql = (
                 f"COALESCE(st.store_id, ua.default_store_id) "
                 f"IN ({placeholders})"
             )
-            scope_params = list(user["store_ids"])
+            scope_params = list(scoped_user["store_ids"])
         else:
             scope_sql, scope_params = "1=0", []
         rows = execute_all(
@@ -1775,6 +3200,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             return self._finance_exchange_rows(connection, user)
         if resource == "invoices":
             return self._finance_invoice_rows(connection, user)
+        if resource == "reconciliations":
+            return self._finance_reconciliation_rows(connection, user)
         if resource == "material-budgets":
             return self._finance_budget_rows(connection, user)
         if resource in {"my-expenses", "expense-audits"}:
@@ -2012,6 +3439,42 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             [user["tenant_id"], *params],
         )
 
+    def _finance_reconciliation_rows(
+        self, connection, user: dict
+    ) -> list:
+        clause, params = self._store_clause(user, "rec")
+        return execute_all(
+            connection,
+            f"""
+            SELECT rec.reconciliation_id AS id,
+                   fr.receipt_no AS receiptNo,
+                   rec.external_channel AS externalChannel,
+                   rec.external_reference AS externalReference,
+                   rec.system_amount AS systemAmount,
+                   rec.external_amount AS externalAmount,
+                   rec.difference_amount AS differenceAmount,
+                   rec.transaction_date AS transactionDate,
+                   rec.status, s.name AS store,
+                   creator.username AS creator,
+                   matcher.username AS matchedBy,
+                   rec.matched_at AS matchedAt,
+                   rec.remark, rec.created_at AS createdAt
+            FROM finance_reconciliations rec
+            JOIN finance_receipts fr ON fr.receipt_id=rec.receipt_id
+            JOIN stores s ON s.store_id=rec.store_id
+            JOIN user_accounts creator
+              ON creator.user_id=rec.created_by_user_id
+            LEFT JOIN user_accounts matcher
+              ON matcher.user_id=rec.matched_by_user_id
+            WHERE rec.tenant_id=%s AND rec.deleted_at IS NULL
+              AND {clause}
+            ORDER BY rec.transaction_date DESC,
+                     rec.reconciliation_id DESC
+            LIMIT 1000
+            """,
+            [user["tenant_id"], *params],
+        )
+
     def _finance_budget_rows(self, connection, user: dict) -> list:
         clause, params = self._store_clause(user, "b")
         return execute_all(
@@ -2141,7 +3604,120 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             return self._save_finance_expense(
                 connection, user, body, record_id
             )
+        if resource == "reconciliations" and not record_id:
+            return self._save_finance_reconciliation(
+                connection, user, body
+            )
         raise ApiError("当前财务页面不支持新增或编辑", 403, 40300)
+
+    def _save_finance_reconciliation(
+        self, connection, user: dict, body: dict
+    ):
+        self._require_finance_access(user, "reconciliations", "添加")
+        store_id = self._finance_store_id(connection, user, body)
+        receipt_no = str(body.get("receiptNo") or "").strip()
+        channel = str(body.get("externalChannel") or "").strip()
+        external_reference = str(
+            body.get("externalReference") or ""
+        ).strip()
+        transaction_date = str(body.get("transactionDate") or "")[:10]
+        if not receipt_no:
+            raise ApiError("系统收款单号不能为空")
+        if not channel or not external_reference:
+            raise ApiError("外部渠道和外部流水号不能为空")
+        try:
+            date.fromisoformat(transaction_date)
+        except ValueError:
+            raise ApiError("外部交易日期格式不正确")
+        external_amount = self._finance_positive_amount(
+            body, "externalAmount"
+        )
+        receipt = execute_one(
+            connection,
+            """
+            SELECT fr.receipt_id,
+                   COALESCE(ext.received_amount,fr.amount) AS system_amount
+            FROM finance_receipts fr
+            LEFT JOIN finance_receipt_extensions ext
+              ON ext.receipt_id=fr.receipt_id
+            WHERE fr.tenant_id=%s AND fr.store_id=%s
+              AND fr.receipt_no=%s
+              AND fr.status IN ('审核通过','已审核')
+            """,
+            (user["tenant_id"], store_id, receipt_no),
+        )
+        if not receipt:
+            raise ApiError("仅能对账当前门店已审核的有效收款单")
+        duplicate = execute_one(
+            connection,
+            """
+            SELECT reconciliation_id
+            FROM finance_reconciliations
+            WHERE tenant_id=%s AND store_id=%s
+              AND external_channel=%s AND external_reference=%s
+              AND deleted_at IS NULL
+            """,
+            (
+                user["tenant_id"],
+                store_id,
+                channel,
+                external_reference,
+            ),
+        )
+        if duplicate:
+            raise ApiError("该门店的外部流水已登记，不能重复对账")
+        system_amount = Decimal(str(receipt["system_amount"] or 0))
+        difference = external_amount - system_amount
+        status = "待匹配" if difference == 0 else "差异待处理"
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO finance_reconciliations(
+                  tenant_id,store_id,receipt_id,external_channel,
+                  external_reference,external_amount,system_amount,
+                  difference_amount,transaction_date,status,remark,
+                  created_by_user_id
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    user["tenant_id"],
+                    store_id,
+                    receipt["receipt_id"],
+                    channel,
+                    external_reference,
+                    external_amount,
+                    system_amount,
+                    difference,
+                    transaction_date,
+                    status,
+                    body.get("remark") or None,
+                    user["user_id"],
+                ),
+            )
+            reconciliation_id = cursor.lastrowid
+        self._audit(
+            connection,
+            user,
+            "FINANCE_RECONCILIATION",
+            reconciliation_id,
+            "CREATE",
+            store_id,
+            None,
+            status,
+            {
+                "receiptNo": receipt_no,
+                "externalReference": external_reference,
+                "differenceAmount": str(difference),
+            },
+        )
+        connection.commit()
+        return self._success(
+            {
+                "id": reconciliation_id,
+                "status": status,
+                "differenceAmount": difference,
+            }
+        )
 
     def _save_finance_receipt(
         self, connection, user: dict, body: dict, receipt_id: int
@@ -2151,7 +3727,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             receipt = execute_one(
                 connection,
                 f"""
-                SELECT fr.receipt_id, fr.store_id
+                SELECT fr.receipt_id, fr.store_id, fr.status
                 FROM finance_receipts fr
                 WHERE fr.receipt_id=%s AND fr.tenant_id=%s
                   AND {self._store_clause(user, 'fr')[0]}
@@ -2164,6 +3740,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             )
             if not receipt:
                 raise ApiError("收款单不存在或无权访问", 404, 40400)
+            if receipt["status"] != "待审核":
+                raise ApiError("只有待审核收款单可以编辑")
         else:
             self._require_finance_access(user, "receipt-create", "保存")
 
@@ -2199,18 +3777,45 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         document_date = str(
             body.get("documentDate") or date.today().isoformat()
         )[:10]
+        try:
+            parsed_document_date = date.fromisoformat(document_date)
+        except ValueError:
+            raise ApiError("单据日期格式不正确")
+        if parsed_document_date > date.today():
+            raise ApiError("收款单据日期不能晚于今天")
+        if parsed_document_date < date.today() and not str(
+            body.get("remark") or ""
+        ).strip():
+            raise ApiError("历史补录收款必须填写备注说明")
+        if str(body.get("invoiceStatus") or "未开票") == "已开票":
+            raise ApiError(
+                "收款单不能直接标记已开票，请审核通过后登记真实发票号码"
+            )
         received_at = f"{document_date} {datetime.now():%H:%M:%S}"
         contract_id = int(body.get("contractId") or 0) or None
+        if "合同" in receipt_type and not contract_id:
+            raise ApiError("合同类收款必须选择已审核合同")
         if contract_id:
             contract = execute_one(
                 connection,
                 """
-                SELECT contract_id FROM contracts
-                WHERE tenant_id=%s AND contract_id=%s
-                  AND customer_id=%s AND store_id=%s
-                  AND deleted_at IS NULL
+                SELECT ct.contract_id,ct.amount,
+                       COALESCE(SUM(
+                         CASE WHEN fr.status<>'已删除'
+                           AND fr.receipt_id<>%s
+                           THEN fr.amount ELSE 0 END
+                       ),0) AS recorded_amount
+                FROM contracts ct
+                LEFT JOIN finance_receipts fr
+                  ON fr.contract_id=ct.contract_id
+                WHERE ct.tenant_id=%s AND ct.contract_id=%s
+                  AND ct.customer_id=%s AND ct.store_id=%s
+                  AND ct.deleted_at IS NULL
+                  AND ct.status IN ('已审核','审核通过')
+                GROUP BY ct.contract_id
                 """,
                 (
+                    receipt_id,
                     user["tenant_id"],
                     contract_id,
                     customer_id,
@@ -2218,7 +3823,12 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 ),
             )
             if not contract:
-                raise ApiError("关联合同不存在或不属于所选客户")
+                raise ApiError("已审核合同不存在或不属于所选客户")
+            remaining = Decimal(str(contract["amount"] or 0)) - Decimal(
+                str(contract["recorded_amount"] or 0)
+            )
+            if amount > remaining:
+                raise ApiError("收款金额不能超过合同剩余可收金额")
         with connection.cursor() as cursor:
             if receipt_id:
                 cursor.execute(
@@ -2333,25 +3943,26 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         )
         store_id = self._finance_store_id(connection, user, body)
         amount = self._finance_positive_amount(body, "refundAmount")
-        customer_id = int(body.get("customerId") or 0) or None
-        if customer_id:
-            customer = execute_one(
-                connection,
-                """
-                SELECT customer_id FROM customers
-                WHERE tenant_id=%s AND customer_id=%s AND store_id=%s
-                  AND deleted_at IS NULL
-                """,
-                (user["tenant_id"], customer_id, store_id),
-            )
-            if not customer:
-                raise ApiError("退款客户不存在或不属于当前门店")
+        customer_id = int(body.get("customerId") or 0)
+        if not customer_id:
+            raise ApiError("退款申请必须选择当前门店客户")
+        customer = execute_one(
+            connection,
+            """
+            SELECT customer_id FROM customers
+            WHERE tenant_id=%s AND customer_id=%s AND store_id=%s
+              AND deleted_at IS NULL
+            """,
+            (user["tenant_id"], customer_id, store_id),
+        )
+        if not customer:
+            raise ApiError("退款客户不存在或不属于当前门店")
         with connection.cursor() as cursor:
             if refund_id:
                 row = execute_one(
                     connection,
                     f"""
-                    SELECT ro.refund_id FROM refund_orders ro
+                    SELECT ro.refund_id, ro.status FROM refund_orders ro
                     WHERE ro.refund_id=%s AND ro.tenant_id=%s
                       AND ro.deleted_at IS NULL
                       AND {self._store_clause(user, 'ro')[0]}
@@ -2364,6 +3975,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 )
                 if not row:
                     raise ApiError("退款单不存在或无权访问", 404, 40400)
+                if row["status"] not in {"待提交", "被驳回"}:
+                    raise ApiError("只有待提交或被驳回的退款单可以编辑")
                 cursor.execute(
                     """
                     UPDATE refund_orders
@@ -2544,7 +4157,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 row = execute_one(
                     connection,
                     f"""
-                    SELECT eo.expense_id
+                    SELECT eo.expense_id, eo.status
                     FROM expense_orders eo
                     JOIN finance_expense_extensions ext
                       ON ext.expense_id=eo.expense_id
@@ -2562,6 +4175,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 )
                 if not row:
                     raise ApiError("费用单不存在或不可编辑", 404, 40400)
+                if row["status"] not in {"待提交", "驳回"}:
+                    raise ApiError("只有待提交或驳回的费用单可以编辑")
                 cursor.execute(
                     """
                     UPDATE expense_orders
@@ -2685,6 +4300,10 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             return self._finance_invoice_action(
                 connection, user, action, record_id
             )
+        if resource == "reconciliations":
+            return self._finance_reconciliation_action(
+                connection, user, action, record_id
+            )
         if resource == "material-budgets":
             return self._finance_budget_action(
                 connection, user, action, record_id, body
@@ -2694,6 +4313,83 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 connection, user, resource, action, record_id, body
             )
         raise ApiError("当前财务页面没有可执行操作", 403, 40300)
+
+    def _finance_reconciliation_action(
+        self,
+        connection,
+        user: dict,
+        action: str,
+        reconciliation_id: int,
+    ) -> dict:
+        clause, params = self._store_clause(user, "rec")
+        row = execute_one(
+            connection,
+            f"""
+            SELECT rec.reconciliation_id,rec.store_id,rec.status,
+                   rec.difference_amount
+            FROM finance_reconciliations rec
+            WHERE rec.reconciliation_id=%s AND rec.tenant_id=%s
+              AND rec.deleted_at IS NULL AND {clause}
+            """,
+            [reconciliation_id, user["tenant_id"], *params],
+        )
+        if not row:
+            raise ApiError("对账记录不存在或无权访问", 404, 40400)
+        before = row["status"]
+        after = before
+        with connection.cursor() as cursor:
+            if action == "确认匹配":
+                if Decimal(str(row["difference_amount"] or 0)) != 0:
+                    raise ApiError("仍有金额差异，不能确认匹配")
+                if before == "已匹配":
+                    raise ApiError("该外部流水已完成匹配")
+                after = "已匹配"
+                cursor.execute(
+                    """
+                    UPDATE finance_reconciliations
+                    SET status='已匹配',matched_by_user_id=%s,
+                        matched_at=NOW()
+                    WHERE reconciliation_id=%s
+                    """,
+                    (user["user_id"], reconciliation_id),
+                )
+            elif action == "取消匹配":
+                if before != "已匹配":
+                    raise ApiError("只有已匹配记录可以取消匹配")
+                after = "待匹配"
+                cursor.execute(
+                    """
+                    UPDATE finance_reconciliations
+                    SET status='待匹配',matched_by_user_id=NULL,
+                        matched_at=NULL
+                    WHERE reconciliation_id=%s
+                    """,
+                    (reconciliation_id,),
+                )
+            elif action == "删除":
+                if before == "已匹配":
+                    raise ApiError("已匹配记录须先取消匹配再删除")
+                after = "已删除"
+                cursor.execute(
+                    """
+                    UPDATE finance_reconciliations
+                    SET deleted_at=NOW() WHERE reconciliation_id=%s
+                    """,
+                    (reconciliation_id,),
+                )
+            else:
+                raise ApiError("当前对账操作尚未实现", 403, 40300)
+        self._audit(
+            connection,
+            user,
+            "FINANCE_RECONCILIATION",
+            reconciliation_id,
+            action,
+            row["store_id"],
+            before,
+            after,
+        )
+        return {"id": reconciliation_id, "status": after}
 
     def _finance_receipt_action(
         self,
@@ -2709,7 +4405,9 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             f"""
             SELECT fr.receipt_id,fr.store_id,fr.customer_id,fr.amount,
                    fr.receipt_no,fr.status,fr.contract_id,
-                   COALESCE(ext.writeoff_balance,fr.amount) AS balance
+                   COALESCE(ext.writeoff_balance,fr.amount) AS balance,
+                   COALESCE(ext.invoice_status,'未开票') AS invoice_status,
+                   COALESCE(ext.settled,0) AS settled
             FROM finance_receipts fr
             LEFT JOIN finance_receipt_extensions ext
               ON ext.receipt_id=fr.receipt_id
@@ -2726,12 +4424,16 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             if action in {"星支付", "扫码支付"}:
                 raise ApiError("尚未配置真实支付通道，禁止生成虚假支付结果")
             if action == "删除":
+                if before != "待审核":
+                    raise ApiError("只有待审核收款单可以删除")
                 after = "已删除"
                 cursor.execute(
                     "UPDATE finance_receipts SET status=%s WHERE receipt_id=%s",
                     (after, receipt_id),
                 )
             elif action in {"审核", "批量审核"}:
+                if before != "待审核":
+                    raise ApiError("只有待审核收款单可以审核")
                 result = str(body.get("auditResult") or "审核通过")
                 after = "审核通过" if "通过" in result else "审核未通过"
                 actual = Decimal(str(body.get("actualAmount") or receipt["amount"]))
@@ -2758,6 +4460,10 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     ),
                 )
             elif action == "反审核":
+                if before not in {"审核通过", "审核未通过"}:
+                    raise ApiError("当前收款状态不能反审核")
+                if receipt["invoice_status"] == "已开票" or receipt["settled"]:
+                    raise ApiError("已开票或已核销收款不能反审核")
                 after = "待审核"
                 cursor.execute(
                     """
@@ -2769,6 +4475,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     (receipt_id,),
                 )
             elif action == "手续费":
+                if before != "审核通过":
+                    raise ApiError("只有审核通过的收款单可以登记手续费")
                 fee = Decimal(str(body.get("fee") or 0))
                 if fee < 0:
                     raise ApiError("手续费不能小于0")
@@ -2781,6 +4489,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     (fee, body.get("remark") or None, receipt_id),
                 )
             elif action == "核销":
+                if before != "审核通过":
+                    raise ApiError("只有审核通过的收款单可以核销")
                 amount = self._finance_positive_amount(body, "writeOffAmount")
                 balance = Decimal(str(receipt["balance"] or 0))
                 if amount > balance:
@@ -2814,8 +4524,47 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     (new_balance, int(new_balance == 0), receipt_id),
                 )
             elif action == "开具发票":
+                if before != "审核通过":
+                    raise ApiError("只有审核通过的收款单可以开具发票")
+                invoice_no = str(body.get("invoiceNo") or "").strip()
+                if not invoice_no:
+                    raise ApiError("请填写税控或电子发票平台的真实发票号码")
+                invoice_date = str(
+                    body.get("invoiceDate") or date.today().isoformat()
+                )[:10]
+                try:
+                    date.fromisoformat(invoice_date)
+                except ValueError:
+                    raise ApiError("开票日期格式不正确")
+                duplicate_invoice = execute_one(
+                    connection,
+                    """
+                    SELECT invoice_id FROM invoices
+                    WHERE tenant_id=%s AND deleted_at IS NULL
+                      AND status<>'已删除'
+                      AND (
+                        (source_type='收款单' AND source_ref=%s)
+                        OR invoice_no=%s
+                      )
+                    LIMIT 1
+                    """,
+                    (
+                        user["tenant_id"],
+                        receipt["receipt_no"],
+                        invoice_no,
+                    ),
+                )
+                if duplicate_invoice:
+                    raise ApiError("该收款单已开具发票，不能重复开票")
                 tax_rate_text = str(body.get("taxRate") or "0").replace("%", "")
                 tax_rate = Decimal(tax_rate_text or "0") / Decimal("100")
+                if tax_rate < 0 or tax_rate > 1:
+                    raise ApiError("税率必须在0%到100%之间")
+                if (
+                    str(body.get("invoiceTitleType") or "个人") == "单位"
+                    and not str(body.get("taxpayerNo") or "").strip()
+                ):
+                    raise ApiError("单位发票必须填写纳税人识别码")
                 tax_amount = (
                     Decimal(str(receipt["amount"])) * tax_rate
                 ).quantize(Decimal("0.01"))
@@ -2834,7 +4583,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     (
                         user["tenant_id"],
                         receipt["store_id"],
-                        self._finance_number("FP"),
+                        invoice_no,
                         body.get("invoiceType") or "增值税普通发票",
                         body.get("companyName")
                         or body.get("customerName")
@@ -2849,8 +4598,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                         tax_amount,
                         receipt["receipt_no"],
                         receipt["customer_id"],
-                        body.get("invoiceDate")
-                        or date.today().isoformat(),
+                        invoice_date,
                     ),
                 )
                 cursor.execute(
@@ -2924,12 +4672,16 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         audit_status = before
         with connection.cursor() as cursor:
             if action == "删除":
+                if before not in {"待提交", "被驳回"}:
+                    raise ApiError("只有待提交或被驳回退款可以删除")
                 cursor.execute(
                     "UPDATE refund_orders SET deleted_at=NOW() WHERE refund_id=%s",
                     (refund_id,),
                 )
                 after = "已删除"
             elif action == "提交":
+                if before not in {"待提交", "被驳回"}:
+                    raise ApiError("当前退款状态不能重复提交")
                 after = audit_status = "待审核"
                 cursor.execute(
                     """
@@ -2938,8 +4690,12 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     """,
                     (after, refund_id),
                 )
-            elif action == "打款":
+            elif action in {"打款", "登记退款打款"}:
+                if before != "待退款":
+                    raise ApiError("退款必须审批通过后才能打款")
                 actual = self._finance_positive_amount(body, "actualRefund")
+                if actual > Decimal(str(refund["apply_amount"] or 0)):
+                    raise ApiError("实退金额不能超过申请退款金额")
                 after = audit_status = "已退款"
                 cursor.execute(
                     """
@@ -2974,6 +4730,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     ),
                 )
             elif action == "流程审批":
+                if before != "待审核":
+                    raise ApiError("只有待审核退款可以执行流程审批")
                 result = str(body.get("auditResult") or "通过")
                 if "通过" in result:
                     after, audit_status = "待退款", "审核通过"
@@ -2987,6 +4745,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     (after, refund_id),
                 )
             elif action == "反审核":
+                if before not in {"待退款", "被驳回"}:
+                    raise ApiError("当前退款状态不能反审核")
                 after = audit_status = "待审核"
                 cursor.execute(
                     """
@@ -2996,6 +4756,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     (after, refund_id),
                 )
             elif action == "撤回":
+                if before != "待审核":
+                    raise ApiError("只有待审核退款可以撤回")
                 after = audit_status = "待提交"
                 cursor.execute(
                     """
@@ -3106,6 +4868,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         target = row["audit_status"]
         with connection.cursor() as cursor:
             if action == "删除":
+                if row["audit_status"] not in {"待审核", "已驳回"}:
+                    raise ApiError("只有待审核或已驳回的换货单可以删除")
                 cursor.execute(
                     """
                     UPDATE finance_exchange_audits
@@ -3156,7 +4920,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         row = execute_one(
             connection,
             f"""
-            SELECT i.invoice_id,i.store_id,i.status
+            SELECT i.invoice_id,i.store_id,i.status,
+                   i.source_type,i.source_ref
             FROM invoices i
             WHERE i.invoice_id=%s AND i.tenant_id=%s
               AND i.deleted_at IS NULL AND {clause}
@@ -3172,6 +4937,32 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 "UPDATE invoices SET deleted_at=NOW() WHERE invoice_id=%s",
                 (invoice_id,),
             )
+            if row["source_type"] == "收款单" and row["source_ref"]:
+                cursor.execute(
+                    """
+                    UPDATE finance_receipt_extensions ext
+                    JOIN finance_receipts receipt
+                      ON receipt.receipt_id=ext.receipt_id
+                    SET ext.invoice_status='未开票'
+                    WHERE receipt.tenant_id=%s
+                      AND receipt.receipt_no=%s
+                      AND NOT EXISTS (
+                        SELECT 1 FROM invoices remaining
+                        WHERE remaining.tenant_id=%s
+                          AND remaining.source_type='收款单'
+                          AND remaining.source_ref=%s
+                          AND remaining.deleted_at IS NULL
+                          AND remaining.invoice_id<>%s
+                      )
+                    """,
+                    (
+                        user["tenant_id"],
+                        row["source_ref"],
+                        user["tenant_id"],
+                        row["source_ref"],
+                        invoice_id,
+                    ),
+                )
         self._audit(
             connection,
             user,
@@ -3209,6 +5000,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         detail = {}
         with connection.cursor() as cursor:
             if action == "删除":
+                if row["status"] not in {"待提交", "驳回"}:
+                    raise ApiError("只有待提交或驳回的预算单可以删除")
                 cursor.execute(
                     """
                     UPDATE finance_material_budgets
@@ -3300,6 +5093,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         target = row["status"]
         with connection.cursor() as cursor:
             if action == "删除":
+                if row["status"] not in {"待提交", "驳回"}:
+                    raise ApiError("只有待提交或驳回的费用单可以删除")
                 cursor.execute(
                     """
                     UPDATE expense_orders SET deleted_at=NOW()
@@ -3309,6 +5104,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 )
                 target = "已删除"
             elif action == "提交":
+                if row["status"] not in {"待提交", "驳回"}:
+                    raise ApiError("当前费用状态不能重复提交")
                 target = "已提交"
                 cursor.execute(
                     """
@@ -3318,6 +5115,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     (target, expense_id),
                 )
             elif action == "流程审批":
+                if row["status"] != "已提交":
+                    raise ApiError("只有已提交费用可以执行流程审批")
                 result = str(body.get("auditResult") or "通过")
                 target = "已审批" if "通过" in result else "驳回"
                 cursor.execute(
@@ -3336,7 +5135,11 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     (body.get("auditRemark") or None, expense_id),
                 )
             elif action == "打款":
+                if row["status"] != "已审批":
+                    raise ApiError("费用必须审批通过后才能打款")
                 amount = self._finance_positive_amount(body, "amount")
+                if amount > Decimal(str(row["apply_amount"] or 0)):
+                    raise ApiError("打款金额不能超过审批申请金额")
                 target = "已打款"
                 cursor.execute(
                     """
@@ -3391,6 +5194,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     ),
                 )
             elif action == "反审核":
+                if row["status"] not in {"已提交", "已审批", "驳回"}:
+                    raise ApiError("当前费用状态不能反审核")
                 target = "待提交"
                 cursor.execute(
                     """
@@ -3689,12 +5494,18 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         country_code = str(body.get("countryCode") or "+86").strip()
         if not name:
             raise ApiError("客户姓名不能为空")
+        if len(name) > 30:
+            raise ApiError("客户姓名不能超过30个字符")
+        if len(wechat) > 50:
+            raise ApiError("QQ/微信不能超过50个字符")
         if not mobile and not wechat:
             raise ApiError("客户电话与 QQ/微信至少填写一项")
         if status == "同意签合同" and not mobile:
             raise ApiError("同意签合同时必须填写客户电话")
         if mobile:
-            if country_code == "+86" and not re.fullmatch(r"1\d{10}", mobile):
+            if country_code == "+86" and not re.fullmatch(
+                r"1[3-9]\d{9}", mobile
+            ):
                 raise ApiError("中国大陆手机号格式不正确")
             if country_code != "+86" and not re.fullmatch(r"\d{6,20}", mobile):
                 raise ApiError("联系电话格式不正确")
@@ -3733,7 +5544,9 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
 
         tracker_id = 0
         try:
-            tracker_id = int(body.get("trackerId") or 0)
+            tracker_id = int(
+                body.get("salesStaffId") or body.get("trackerId") or 0
+            )
         except (TypeError, ValueError):
             tracker_id = 0
         tracker = None
@@ -3748,7 +5561,10 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 """,
                 (tracker_id, user["tenant_id"]),
             )
-        if not tracker and body.get("trackerName"):
+        sales_staff_name = str(
+            body.get("salesStaffName") or body.get("trackerName") or ""
+        ).strip()
+        if not tracker and sales_staff_name:
             tracker = execute_one(
                 connection,
                 """
@@ -3761,22 +5577,13 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 (
                     user["tenant_id"],
                     store_id,
-                    str(body.get("trackerName")).strip(),
+                    sales_staff_name,
                 ),
             )
-        if not tracker and user.get("staff_id"):
-            tracker = execute_one(
-                connection,
-                """
-                SELECT staff_id,store_id,department
-                FROM staff
-                WHERE staff_id=%s AND tenant_id=%s
-                  AND employment_status='ACTIVE'
-                """,
-                (user["staff_id"], user["tenant_id"]),
-            )
+        if not tracker:
+            raise ApiError("请选择当前门店的所属业务员")
         if tracker and int(tracker.get("store_id") or 0) != store_id:
-            raise ApiError("跟踪人不属于当前意向门店")
+            raise ApiError("所属业务员不属于当前意向门店")
         tracker_id = int(tracker["staff_id"]) if tracker else None
 
         room_id = int(body.get("roomId") or 0) or None
@@ -4052,7 +5859,11 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                    pv.package_version_id AS packageVersionId,
                    pr.price_rule_id AS packagePriceRuleId,
                    pp.package_name AS name,
+                   pp.package_name AS packageName,
                    pr.reference_amount AS amount,
+                   COALESCE(profile.original_amount,pr.reference_amount) AS referencePrice,
+                   COALESCE(profile.activity_amount,pr.reference_amount) AS activityPrice,
+                   COALESCE(profile.deal_amount,pr.reference_amount) AS salePrice,
                    pr.stay_days AS days,
                    rt.name AS roomType,
                    rt.room_type_id AS roomTypeId,
@@ -4062,6 +5873,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             JOIN package_versions pv ON pv.package_id=pp.package_id
             JOIN package_price_rules pr
               ON pr.package_version_id=pv.package_version_id
+            LEFT JOIN package_price_profiles profile
+              ON profile.price_rule_id=pr.price_rule_id
             JOIN room_types rt ON rt.room_type_id=pr.room_type_id
             JOIN stores s ON s.store_id=pr.store_id
             WHERE pp.tenant_id=%s AND pp.deleted_at IS NULL
@@ -4114,17 +5927,6 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             """,
             [user["tenant_id"], *staff_params],
         )
-        source_rows = execute_all(
-            connection,
-            """
-            SELECT DISTINCT c.source AS name
-            FROM customers c
-            WHERE c.tenant_id=%s AND c.deleted_at IS NULL
-              AND c.source IS NOT NULL AND c.source<>''
-            ORDER BY c.source
-            """,
-            (user["tenant_id"],),
-        )
         dictionary_rows = []
         dictionary_tables = execute_one(
             connection,
@@ -4172,10 +5974,30 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 )
             ]
 
+        legacy_customer_sources = [
+            "客户介绍",
+            "住附近",
+            "电话来访",
+            "大众点评",
+            "美团咨询",
+            "地推拓客",
+            "抖音咨询",
+            "小红书咨询",
+            "自然上门",
+            "网络搜索",
+            "市场渠道",
+            "二胎入住",
+            "内部资源",
+        ]
+        source_dictionary_rows = dictionary_values("来源", "source")
         sources = [
             {"id": row.get("id") or f"source-{index + 1}", "name": row["name"]}
             for index, row in enumerate(
-                dictionary_values("来源", "source") or source_rows
+                source_dictionary_rows
+                or [
+                    {"id": f"legacy-source-{index + 1}", "name": name}
+                    for index, name in enumerate(legacy_customer_sources)
+                ]
             )
         ]
         areas = [
@@ -4235,7 +6057,10 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         if resource not in supported:
             raise ApiError("客户资源不存在", 404, 40400)
         if resource not in {"my-customers", "customers", "signed-customers"}:
-            return self._success({"list": [], "total": 0})
+            rows = self._operational_module_rows(
+                connection, user, "CUSTOMER", resource, query
+            )
+            return self._success({"list": rows, "total": len(rows)})
 
         store_clause, store_params = self._store_clause(user, "c")
         owner_sql = ""
@@ -4260,7 +6085,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                    c.birthday, c.age, c.phone AS mobile,
                    c.wechat, c.status, c.source,
                    c.edc AS dueDate, c.created_at AS createdAt,
-                   c.remark, c.customer_no AS memberCard,
+                    c.remark, c.customer_no AS memberCard,
+                    profile.tags_json AS tagsJson,
                    sales.name AS salesperson,
                    creator.username AS creator,
                    intended.name AS intendedStore,
@@ -4274,6 +6100,9 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             LEFT JOIN staff sales ON sales.staff_id=c.sales_staff_id
             LEFT JOIN user_accounts creator
               ON creator.user_id=c.created_by_user_id
+            LEFT JOIN customer_entry_profiles profile
+              ON profile.customer_id=c.customer_id
+             AND profile.tenant_id=c.tenant_id
             LEFT JOIN stores intended ON intended.store_id=c.store_id
             LEFT JOIN contracts ct
               ON ct.customer_id=c.customer_id
@@ -4299,7 +6128,1368 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         )
         for row in rows:
             row["mobile"] = self._masked_phone(user, row.get("mobile"))
+            try:
+                tags = json.loads(row.pop("tagsJson") or "[]")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                tags = []
+            row["tags"] = "、".join(str(tag).strip() for tag in tags if str(tag).strip())
         return self._success({"list": rows, "total": len(rows)})
+
+    def _requested_store_id(self, user: dict, source: dict) -> int | None:
+        raw = source.get("storeId") or source.get("store_id")
+        if raw in (None, "", "all"):
+            return None
+        return self._allowed_store(user, raw)
+
+    def _scoped_store_clause(
+        self, user: dict, source: dict, alias: str
+    ) -> tuple[str, list]:
+        clause, params = self._store_clause(user, alias)
+        store_id = self._requested_store_id(user, source)
+        if store_id is None:
+            return clause, params
+        return f"{clause} AND {alias}.store_id=%s", [*params, store_id]
+
+    def _resolve_write_store(
+        self, connection, user: dict, body: dict
+    ) -> int:
+        raw = body.get("storeId") or body.get("store_id")
+        if raw not in (None, "", "all"):
+            return self._allowed_store(user, raw)
+        store_name = str(body.get("store") or "").strip()
+        if store_name:
+            row = execute_one(
+                connection,
+                """
+                SELECT store_id
+                FROM stores
+                WHERE tenant_id=%s AND name=%s
+                """,
+                (user["tenant_id"], store_name),
+            )
+            if row:
+                return self._allowed_store(user, row["store_id"])
+        raise ApiError("新增或编辑前请选择具体门店，全部门店仅可查询汇总", 400, 40000)
+
+    def _inventory_quantity(
+        self, value, label: str, *, allow_zero: bool = False
+    ) -> int:
+        try:
+            quantity = Decimal(str(value))
+        except Exception as exc:
+            raise ApiError(f"{label}必须是整数") from exc
+        if quantity != quantity.to_integral_value():
+            raise ApiError(f"{label}必须是整数")
+        quantity_int = int(quantity)
+        if quantity_int < 0 or (quantity_int == 0 and not allow_zero):
+            suffix = "非负整数" if allow_zero else "正整数"
+            raise ApiError(f"{label}必须是{suffix}")
+        return quantity_int
+
+    def _inventory_item(self, connection, user: dict, item_name) -> dict:
+        name = str(item_name or "").strip()
+        if not name:
+            raise ApiError("请填写已建档的物料名称")
+        rows = execute_all(
+            connection,
+            """
+            SELECT item_id, name, unit
+            FROM items
+            WHERE tenant_id=%s AND name=%s
+            LIMIT 2
+            """,
+            (user["tenant_id"], name),
+        )
+        if not rows:
+            raise ApiError(
+                f"物料“{name}”尚未建档，请先在物料档案维护后再过账",
+                409,
+                40900,
+            )
+        if len(rows) > 1:
+            raise ApiError(
+                f"物料“{name}”存在重名，请先合并物料档案",
+                409,
+                40900,
+            )
+        return rows[0]
+
+    def _inventory_store_by_name(
+        self, connection, user: dict, value, label: str
+    ) -> int:
+        name = str(value or "").strip()
+        if not name:
+            raise ApiError(f"请选择{label}")
+        row = execute_one(
+            connection,
+            """
+            SELECT store_id
+            FROM stores
+            WHERE tenant_id=%s AND name=%s
+            """,
+            (user["tenant_id"], name),
+        )
+        if not row:
+            raise ApiError(f"{label}不存在")
+        return self._allowed_store(user, row["store_id"])
+
+    def _locked_inventory(
+        self,
+        connection,
+        user: dict,
+        store_id: int,
+        item_id: int,
+    ) -> dict:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO inventory(
+                  tenant_id, store_id, item_id,
+                  qty, warn_qty, avg_cost, version
+                )
+                VALUES (%s,%s,%s,0,0,0,0)
+                ON DUPLICATE KEY UPDATE item_id=VALUES(item_id)
+                """,
+                (user["tenant_id"], store_id, item_id),
+            )
+        return execute_one(
+            connection,
+            """
+            SELECT qty, warn_qty, avg_cost, version
+            FROM inventory
+            WHERE tenant_id=%s AND store_id=%s AND item_id=%s
+            FOR UPDATE
+            """,
+            (user["tenant_id"], store_id, item_id),
+        )
+
+    def _record_stock_movement(
+        self,
+        connection,
+        user: dict,
+        store_id: int,
+        item_id: int,
+        movement_type: str,
+        quantity: int,
+        reference: str,
+    ) -> None:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO stock_movements(
+                  tenant_id, store_id, item_id, type,
+                  qty, ref, created_at, created_by
+                )
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    user["tenant_id"],
+                    store_id,
+                    item_id,
+                    movement_type,
+                    quantity,
+                    reference,
+                    datetime.now().isoformat(timespec="seconds"),
+                    str(user.get("username") or user["user_id"]),
+                ),
+            )
+
+    def _apply_inventory_save_effect(
+        self,
+        connection,
+        user: dict,
+        resource: str,
+        store_id: int,
+        payload: dict,
+    ) -> None:
+        if resource != "stock-warnings":
+            return
+        item = self._inventory_item(
+            connection, user, payload.get("materialName")
+        )
+        safety_quantity = self._inventory_quantity(
+            payload.get("safetyQuantity"),
+            "安全库存",
+            allow_zero=True,
+        )
+        self._locked_inventory(
+            connection, user, store_id, item["item_id"]
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE inventory
+                SET warn_qty=%s, version=version+1
+                WHERE tenant_id=%s AND store_id=%s AND item_id=%s
+                """,
+                (
+                    safety_quantity,
+                    user["tenant_id"],
+                    store_id,
+                    item["item_id"],
+                ),
+            )
+
+    def _apply_inventory_action_effect(
+        self,
+        connection,
+        user: dict,
+        resource: str,
+        action: str,
+        existing: dict,
+        payload: dict,
+        action_payload: dict,
+    ) -> None:
+        if resource == "stock-transfers" and action == "调入确认":
+            if existing["status"] != "待收货":
+                raise ApiError("请先完成调出确认，且不可重复调入", 409, 40900)
+            source_store = self._inventory_store_by_name(
+                connection, user, payload.get("sourceWarehouse"), "调出门店"
+            )
+            target_store = self._inventory_store_by_name(
+                connection, user, payload.get("targetWarehouse"), "调入门店"
+            )
+            if source_store == target_store:
+                raise ApiError("调出门店与调入门店不能相同")
+            item = self._inventory_item(
+                connection, user, payload.get("materialName")
+            )
+            quantity = self._inventory_quantity(
+                payload.get("quantity"), "调拨数量"
+            )
+            source_inventory = self._locked_inventory(
+                connection, user, source_store, item["item_id"]
+            )
+            self._locked_inventory(
+                connection, user, target_store, item["item_id"]
+            )
+            if int(source_inventory["qty"] or 0) < quantity:
+                raise ApiError("调出门店可用库存不足", 409, 40900)
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE inventory
+                    SET qty=qty-%s, version=version+1
+                    WHERE tenant_id=%s AND store_id=%s AND item_id=%s
+                    """,
+                    (
+                        quantity,
+                        user["tenant_id"],
+                        source_store,
+                        item["item_id"],
+                    ),
+                )
+                cursor.execute(
+                    """
+                    UPDATE inventory
+                    SET qty=qty+%s, version=version+1
+                    WHERE tenant_id=%s AND store_id=%s AND item_id=%s
+                    """,
+                    (
+                        quantity,
+                        user["tenant_id"],
+                        target_store,
+                        item["item_id"],
+                    ),
+                )
+            self._record_stock_movement(
+                connection,
+                user,
+                source_store,
+                item["item_id"],
+                "调拨出库",
+                -quantity,
+                existing["business_no"],
+            )
+            self._record_stock_movement(
+                connection,
+                user,
+                target_store,
+                item["item_id"],
+                "调拨入库",
+                quantity,
+                existing["business_no"],
+            )
+            return
+
+        if resource == "stocktakes" and action == "审核":
+            if action_payload.get("auditResult") == "审核不通过":
+                return
+            if existing["status"] != "待审核":
+                raise ApiError("请先完成盘点，再执行审核过账", 409, 40900)
+            item = self._inventory_item(
+                connection, user, payload.get("materialName")
+            )
+            actual_quantity = self._inventory_quantity(
+                payload.get("actualQuantity"),
+                "实盘数量",
+                allow_zero=True,
+            )
+            current = self._locked_inventory(
+                connection,
+                user,
+                existing["store_id"],
+                item["item_id"],
+            )
+            book_quantity = int(current["qty"] or 0)
+            difference = actual_quantity - book_quantity
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE inventory
+                    SET qty=%s, version=version+1
+                    WHERE tenant_id=%s AND store_id=%s AND item_id=%s
+                    """,
+                    (
+                        actual_quantity,
+                        user["tenant_id"],
+                        existing["store_id"],
+                        item["item_id"],
+                    ),
+                )
+            payload.update(
+                {
+                    "bookQuantity": book_quantity,
+                    "differenceQuantity": difference,
+                }
+            )
+            if difference:
+                self._record_stock_movement(
+                    connection,
+                    user,
+                    existing["store_id"],
+                    item["item_id"],
+                    "盘点调整",
+                    difference,
+                    existing["business_no"],
+                )
+            return
+
+        if resource == "purchase-orders" and action == "到货登记":
+            if existing["status"] != "已审核":
+                raise ApiError("采购单审核通过后才能登记到货", 409, 40900)
+            item = self._inventory_item(
+                connection, user, payload.get("materialName")
+            )
+            quantity = self._inventory_quantity(
+                payload.get("quantity"), "到货数量"
+            )
+            try:
+                unit_price = Decimal(str(payload.get("unitPrice")))
+            except Exception as exc:
+                raise ApiError("采购单价必须是非负数字") from exc
+            if unit_price < 0:
+                raise ApiError("采购单价必须是非负数字")
+            current = self._locked_inventory(
+                connection,
+                user,
+                existing["store_id"],
+                item["item_id"],
+            )
+            current_quantity = int(current["qty"] or 0)
+            current_cost = Decimal(str(current["avg_cost"] or 0))
+            resulting_quantity = current_quantity + quantity
+            weighted_cost = (
+                (
+                    current_cost * current_quantity
+                    + unit_price * quantity
+                )
+                / resulting_quantity
+            ).quantize(Decimal("0.0001"))
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE inventory
+                    SET qty=%s, avg_cost=%s, version=version+1
+                    WHERE tenant_id=%s AND store_id=%s AND item_id=%s
+                    """,
+                    (
+                        resulting_quantity,
+                        weighted_cost,
+                        user["tenant_id"],
+                        existing["store_id"],
+                        item["item_id"],
+                    ),
+                )
+            self._record_stock_movement(
+                connection,
+                user,
+                existing["store_id"],
+                item["item_id"],
+                "采购入库",
+                quantity,
+                existing["business_no"],
+            )
+
+    def _get_service_resource(
+        self,
+        connection,
+        user: dict,
+        resource: str,
+        query: dict,
+    ):
+        self._require_any_permission(user, ("CUSTOMER.VIEW",))
+        match = re.fullmatch(r"/(f\d{3})(?:/([^/]+))?", resource)
+        if not match:
+            raise ApiError("客服资源不存在", 404, 40400)
+        feature_code, record_ref = match.groups()
+        try:
+            validate_resource("SERVICE", feature_code)
+        except ValueError as exc:
+            raise ApiError("客服资源不存在", 404, 40400) from exc
+
+        scope_query = dict(query)
+        if feature_code == "f043":
+            scope_query.pop("storeId", None)
+        rows = self._operational_module_rows(
+            connection, user, "SERVICE", feature_code, scope_query
+        )
+        for row in rows:
+            row.setdefault("recordNo", row.get("businessNo"))
+            row.setdefault("externalStatus", "NOT_REQUIRED")
+            row.setdefault("externalStatusLabel", "无需外部通道")
+
+        if record_ref:
+            record = next(
+                (row for row in rows if str(row.get("id")) == record_ref),
+                None,
+            )
+            if not record:
+                raise ApiError("客服记录不存在或不属于当前门店", 404, 40400)
+            record_id = parse_record_id(record_ref)
+            logs = execute_all(
+                connection,
+                """
+                SELECT event_id AS id, action_code AS action,
+                       before_status AS beforeStatus,
+                       after_status AS afterStatus,
+                       detail_json AS detailJson,
+                       created_at AS createdAt
+                FROM mvp_audit_events
+                WHERE tenant_id=%s AND aggregate_type='SERVICE_RECORD'
+                  AND aggregate_id=%s
+                ORDER BY event_id DESC
+                LIMIT 100
+                """,
+                (user["tenant_id"], record_id),
+            )
+            for log in logs:
+                detail = log.pop("detailJson", None)
+                try:
+                    detail = json.loads(detail or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    detail = {}
+                log["note"] = detail.get("note") or detail.get("resource") or ""
+            return self._success({"record": record, "logs": logs})
+
+        status = str(query.get("status") or "").strip()
+        keyword = str(query.get("keyword") or "").strip().lower()
+        if status:
+            rows = [row for row in rows if str(row.get("status") or "") == status]
+        if keyword:
+            rows = [
+                row
+                for row in rows
+                if keyword
+                in " ".join(str(value or "") for value in row.values()).lower()
+            ]
+        return self._success(
+            {"list": rows, "total": len(rows), "source": "mysql", "persisted": True}
+        )
+
+    def _post_service_resource(
+        self,
+        connection,
+        user: dict,
+        resource: str,
+        body: dict,
+    ):
+        match = re.fullmatch(r"/(f\d{3})(?:/([^/]+)/action)?", resource)
+        if not match:
+            raise ApiError("客服资源不存在", 404, 40400)
+        feature_code, record_ref = match.groups()
+        try:
+            validate_resource("SERVICE", feature_code)
+        except ValueError as exc:
+            raise ApiError("客服资源不存在", 404, 40400) from exc
+
+        if not record_ref:
+            payload = dict(body)
+            if not str(payload.get("status") or "").strip():
+                payload["status"] = {
+                    "f005": "待回访",
+                    "f043": "草稿",
+                    "f084": "草稿",
+                    "f094": "待接入",
+                }[feature_code]
+            if not payload.get("storeId") and not payload.get("store_id"):
+                clause, params = self._store_clause(user, "store")
+                origin_store = execute_one(
+                    connection,
+                    f"""
+                    SELECT store.store_id
+                    FROM stores store
+                    WHERE store.tenant_id=%s AND {clause}
+                    ORDER BY store.store_id
+                    LIMIT 1
+                    """,
+                    [user["tenant_id"], *params],
+                )
+                if not origin_store:
+                    raise ApiError("当前账号没有可用门店", 403, 40300)
+                payload["storeId"] = origin_store["store_id"]
+                if feature_code == "f043":
+                    payload["scope"] = "全门店共享"
+            return self._post_operational_module_record(
+                connection, user, "SERVICE", feature_code, "save", payload
+            )
+
+        action = str(body.get("action") or "").strip().upper()
+        record_id = parse_record_id(record_ref)
+        existing = execute_one(
+            connection,
+            """
+            SELECT store_id, status, payload_json FROM erp_operational_records
+            WHERE record_id=%s AND tenant_id=%s
+              AND module_code='SERVICE' AND resource_code=%s
+              AND deleted_at IS NULL
+            """,
+            (record_id, user["tenant_id"], feature_code),
+        )
+        if not existing:
+            raise ApiError("客服记录不存在或不属于当前门店", 404, 40400)
+        self._allowed_store(user, existing["store_id"])
+        # Deletion is a local record operation, not a customer-service state
+        # transition.  Route it through the audited operational-record helper
+        # so acceptance records and mistaken drafts can be rolled back without
+        # teaching every service state machine a fake DELETE transition.
+        if action in {"DELETE", "删除"}:
+            return self._post_operational_module_record(
+                connection,
+                user,
+                "SERVICE",
+                feature_code,
+                "action",
+                {**body, "id": record_ref, "action": "删除"},
+            )
+        try:
+            existing_payload = json.loads(existing.get("payload_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            existing_payload = {}
+        channel = str(existing_payload.get("channel") or "").strip()
+        target_status, external_required = customer_service_transition(
+            feature_code.upper(), existing["status"], action, channel
+        )
+        if action == "AI_REPLY":
+            raise ApiError(
+                "AI 客服未配置模型与知识检索服务，本次未生成或发送回复",
+                503,
+                50300,
+            )
+
+        payload = {**body, "id": record_ref, "status": target_status}
+        if external_required:
+            current_payload = dict(existing_payload)
+            current_payload.update(
+                {
+                    "status": "待通道配置",
+                    "externalStatus": "NOT_CONFIGURED",
+                    "externalStatusLabel": "外部通道未配置",
+                    "lastAction": action,
+                    "lastActionAt": datetime.now().isoformat(timespec="seconds"),
+                }
+            )
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE erp_operational_records
+                    SET status='待通道配置', payload_json=%s,
+                        updated_by_user_id=%s, version=version+1
+                    WHERE record_id=%s
+                    """,
+                    (compact_json(current_payload), user["user_id"], record_id),
+                )
+            self._audit(
+                connection,
+                user,
+                "SERVICE_RECORD",
+                record_id,
+                action,
+                existing["store_id"],
+                existing["status"],
+                "待通道配置",
+                {"resource": feature_code, "note": body.get("note") or ""},
+            )
+            connection.commit()
+            raise ApiError(
+                "通知未发送；记录已标记为待通道配置",
+                503,
+                50300,
+            )
+        return self._post_operational_module_record(
+            connection, user, "SERVICE", feature_code, "action", payload
+        )
+
+    def _operational_module_rows(
+        self,
+        connection,
+        user: dict,
+        module_code: str,
+        resource: str,
+        query: dict,
+    ) -> list[dict]:
+        try:
+            validate_resource(module_code, resource)
+        except ValueError as exc:
+            raise ApiError("业务资源不存在", 404, 40400) from exc
+        clause, params = self._scoped_store_clause(user, query, "record")
+        rows = execute_all(
+            connection,
+            f"""
+            SELECT record.record_id, record.store_id,
+                   record.business_no, record.status,
+                   record.payload_json, record.created_at,
+                   record.updated_at, store.name AS store_name
+            FROM erp_operational_records record
+            JOIN stores store ON store.store_id=record.store_id
+            WHERE record.tenant_id=%s
+              AND record.module_code=%s
+              AND record.resource_code=%s
+              AND record.deleted_at IS NULL
+              AND {clause}
+            ORDER BY record.updated_at DESC, record.record_id DESC
+            LIMIT 1000
+            """,
+            [
+                user["tenant_id"],
+                module_code,
+                resource,
+                *params,
+            ],
+        )
+        result = []
+        id_field = identifier_field(resource)
+        for row in rows:
+            try:
+                payload = json.loads(row.get("payload_json") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            payload.update(
+                {
+                    "id": f"OP-{row['record_id']}",
+                    "recordId": f"OP-{row['record_id']}",
+                    "businessNo": row["business_no"],
+                    "storeId": row["store_id"],
+                    "store": row["store_name"],
+                    "status": payload.get("status") or row["status"],
+                    "createdAt": payload.get("createdAt")
+                    or row["created_at"],
+                    "updatedAt": row["updated_at"],
+                    "recordSource": "本地MySQL",
+                }
+            )
+            payload.setdefault(id_field, row["business_no"])
+            result.append(payload)
+        return result
+
+    def _merge_operational_module_rows(
+        self,
+        connection,
+        user: dict,
+        module_code: str,
+        resource: str,
+        query: dict,
+        data: dict,
+    ) -> dict:
+        durable_rows = self._operational_module_rows(
+            connection, user, module_code, resource, query
+        )
+        existing = data.get("list") if isinstance(data, dict) else []
+        existing = existing if isinstance(existing, list) else []
+        return {
+            **(data if isinstance(data, dict) else {}),
+            "list": [*durable_rows, *existing],
+            "total": len(durable_rows) + len(existing),
+            "source": "mysql",
+            "persisted": True,
+        }
+
+    def _post_operational_module_record(
+        self,
+        connection,
+        user: dict,
+        module_code: str,
+        resource: str,
+        operation: str,
+        body: dict,
+    ):
+        try:
+            validate_resource(module_code, resource)
+        except ValueError as exc:
+            raise ApiError("业务资源不存在", 404, 40400) from exc
+        permission_map = {
+            "RESEARCH": ("RECOVERY.VIEW", "CUSTOMER.VIEW"),
+            "RECOVERY": ("RECOVERY.VIEW",),
+            "CUSTOMER": ("CUSTOMER.VIEW",),
+            "SERVICE": ("CUSTOMER.VIEW",),
+            "NURSING": ("NURSING.VIEW",),
+            "BABY": ("NURSING.VIEW",),
+            "MATRON": ("MATRON.VIEW", "NURSING.VIEW"),
+            "DIET": ("DIET.VIEW", "DIET.QUERY"),
+            "INVENTORY": ("INVENTORY.VIEW", "LEGACY.WEB.N358.B18"),
+            "BASIC": ("BASIC.VIEW", "SYSTEM.VIEW"),
+            "REPORT": ("REPORT.VIEW",),
+            "MALL": ("MALL.VIEW", "SYSTEM.VIEW", "LEGACY.WEB.N470.B18"),
+        }
+        self._require_any_permission(user, permission_map[module_code])
+        if operation not in {"save", "action"}:
+            raise ApiError("业务操作不存在", 404, 40400)
+
+        write_store_id = None
+        if operation == "save":
+            write_store_id = self._resolve_write_store(
+                connection, user, body
+            )
+
+        record_ref = body.get("recordId") or body.get("id")
+        record_id = (
+            parse_record_id(record_ref)
+            if isinstance(record_ref, str) and record_ref.startswith("OP-")
+            else None
+        )
+        if operation == "action" and not record_id:
+            raise ApiError(
+                "请选择本地已落库记录后执行状态操作",
+                409,
+                40900,
+            )
+
+        existing = None
+        if record_id:
+            scope_clause, scope_params = self._store_clause(user, "record")
+            existing = execute_one(
+                connection,
+                f"""
+                SELECT record.record_id, record.store_id,
+                       record.business_no, record.status,
+                       record.payload_json
+                FROM erp_operational_records record
+                WHERE record.record_id=%s
+                  AND record.tenant_id=%s
+                  AND record.module_code=%s
+                  AND record.resource_code=%s
+                  AND record.deleted_at IS NULL
+                  AND {scope_clause}
+                FOR UPDATE
+                """,
+                [
+                    record_id,
+                    user["tenant_id"],
+                    module_code,
+                    resource,
+                    *scope_params,
+                ],
+            )
+            if not existing:
+                raise ApiError("业务记录不存在或不属于当前门店", 404, 40400)
+
+        if operation == "action":
+            action = str(body.get("action") or "").strip()
+            if not action:
+                raise ApiError("请选择业务操作")
+            if action == "删除":
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        UPDATE erp_operational_records
+                        SET deleted_at=NOW(), updated_by_user_id=%s,
+                            version=version+1
+                        WHERE record_id=%s
+                        """,
+                        (user["user_id"], record_id),
+                    )
+                self._audit(
+                    connection,
+                    user,
+                    f"{module_code}_RECORD",
+                    record_id,
+                    "DELETE",
+                    existing["store_id"],
+                    existing["status"],
+                    "已删除",
+                    {"resource": resource},
+                )
+                connection.commit()
+                return self._success(
+                    {"persisted": True, "recordId": f"OP-{record_id}"}
+                )
+            try:
+                current_payload = json.loads(existing["payload_json"] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                current_payload = {}
+            if not isinstance(current_payload, dict):
+                current_payload = {}
+            if module_code == "INVENTORY":
+                self._apply_inventory_action_effect(
+                    connection,
+                    user,
+                    resource,
+                    action,
+                    existing,
+                    current_payload,
+                    body,
+                )
+            patch, status = apply_action(resource, action, body)
+            current_payload.update(patch)
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE erp_operational_records
+                    SET status=%s, payload_json=%s,
+                        updated_by_user_id=%s, version=version+1
+                    WHERE record_id=%s
+                    """,
+                    (
+                        status,
+                        compact_json(current_payload),
+                        user["user_id"],
+                        record_id,
+                    ),
+                )
+            self._audit(
+                connection,
+                user,
+                f"{module_code}_RECORD",
+                record_id,
+                action,
+                existing["store_id"],
+                existing["status"],
+                status,
+                {"resource": resource, "note": body.get("note") or ""},
+            )
+            connection.commit()
+            return self._success(
+                {
+                    "persisted": True,
+                    "recordId": f"OP-{record_id}",
+                    "businessNo": existing["business_no"],
+                    "status": status,
+                }
+            )
+
+        payload = clean_payload(body)
+        if not payload:
+            raise ApiError("请填写业务记录内容")
+        status = str(
+            payload.get("status")
+            or payload.get("orderStatus")
+            or payload.get("stocktakeStatus")
+            or payload.get("auditStatus")
+            or "草稿"
+        )
+        if existing:
+            if operation == "save" and write_store_id != existing["store_id"]:
+                raise ApiError(
+                    "编辑记录必须选择其所属门店，不能跨门店变更交易归属",
+                    403,
+                    40300,
+                )
+            try:
+                merged = json.loads(existing["payload_json"] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                merged = {}
+            merged.update(payload)
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE erp_operational_records
+                    SET status=%s, payload_json=%s,
+                        updated_by_user_id=%s, version=version+1
+                    WHERE record_id=%s
+                    """,
+                    (
+                        status,
+                        compact_json(merged),
+                        user["user_id"],
+                        record_id,
+                    ),
+                )
+            store_id = existing["store_id"]
+            generated_no = existing["business_no"]
+            before_status = existing["status"]
+            action_code = "UPDATE"
+            record_payload = merged
+        else:
+            store_id = write_store_id
+            pending_no = f"PENDING-{secrets.token_hex(12)}"
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO erp_operational_records(
+                      tenant_id,store_id,module_code,resource_code,
+                      business_no,status,payload_json,
+                      created_by_user_id,updated_by_user_id
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    (
+                        user["tenant_id"],
+                        store_id,
+                        module_code,
+                        resource,
+                        pending_no,
+                        status,
+                        compact_json(payload),
+                        user["user_id"],
+                        user["user_id"],
+                    ),
+                )
+                record_id = cursor.lastrowid
+                generated_no = business_no(
+                    module_code, resource, record_id
+                )
+                cursor.execute(
+                    """
+                    UPDATE erp_operational_records
+                    SET business_no=%s
+                    WHERE record_id=%s
+                    """,
+                    (generated_no, record_id),
+                )
+            before_status = None
+            action_code = "CREATE"
+            record_payload = payload
+        if module_code == "DIET":
+            self._validate_diet_room_assignment(
+                connection, user, resource, store_id, record_payload
+            )
+        if module_code == "INVENTORY":
+            self._apply_inventory_save_effect(
+                connection,
+                user,
+                resource,
+                store_id,
+                payload,
+            )
+        self._audit(
+            connection,
+            user,
+            f"{module_code}_RECORD",
+            record_id,
+            action_code,
+            store_id,
+            before_status,
+            status,
+            {"resource": resource, "businessNo": generated_no},
+        )
+        connection.commit()
+        return self._success(
+            {
+                "persisted": True,
+                "recordId": f"OP-{record_id}",
+                "businessNo": generated_no,
+                "status": status,
+            }
+        )
+
+    def _diet_store_id_from_value(
+        self, connection, user: dict, source: dict
+    ) -> int | None:
+        requested = self._requested_store_id(user, source)
+        store_name = str(source.get("store") or "").strip()
+        if not store_name:
+            return requested
+        row = execute_one(
+            connection,
+            """
+            SELECT store_id FROM stores
+            WHERE tenant_id=%s AND name=%s
+            """,
+            (user["tenant_id"], store_name),
+        )
+        if not row:
+            raise ApiError("所选门店不存在", 400, 40000)
+        store_id = self._allowed_store(user, row["store_id"])
+        if requested is not None and requested != store_id:
+            raise ApiError("所选门店与当前页面门店不一致", 403, 40300)
+        return store_id
+
+    def _get_diet_room_options(
+        self, connection, user: dict, query: dict
+    ):
+        self._require_any_permission(user, ("DIET.VIEW", "DIET.QUERY"))
+        store_id = self._diet_store_id_from_value(connection, user, query)
+        if store_id is None:
+            raise ApiError("请先选择具体门店后加载房间", 400, 40000)
+        rows = execute_all(
+            connection,
+            """
+            SELECT room.room_no AS room, booking.store_id AS storeId,
+                   store.name AS store, customer.name AS customerName,
+                   booking.booking_id AS bookingId
+            FROM room_bookings booking
+            JOIN rooms room ON room.room_id=booking.room_id
+            JOIN stores store ON store.store_id=booking.store_id
+            JOIN customers customer ON customer.customer_id=booking.customer_id
+            WHERE booking.tenant_id=%s AND booking.store_id=%s
+              AND booking.deleted_at IS NULL AND booking.status='已入住'
+            ORDER BY room.floor, room.layout_order, room.room_no
+            """,
+            (user["tenant_id"], store_id),
+        )
+        return self._success({"list": rows, "total": len(rows)})
+
+    def _get_store_reference_options(
+        self, connection, user: dict, module_code: str, query: dict
+    ):
+        """Return only the selected store's transaction reference values."""
+        permissions = {
+            "NURSING": ("NURSING.VIEW",),
+            "DIET": ("DIET.VIEW", "DIET.QUERY"),
+            "INVENTORY": ("INVENTORY.VIEW", "LEGACY.WEB.N358.B18"),
+        }
+        self._require_any_permission(user, permissions[module_code])
+        store_id = self._requested_store_id(user, query)
+        if str(query.get("store") or "").strip():
+            row = execute_one(
+                connection,
+                "SELECT store_id FROM stores WHERE tenant_id=%s AND name=%s",
+                (user["tenant_id"], str(query.get("store")).strip()),
+            )
+            if not row:
+                raise ApiError("所选门店不存在", 400, 40000)
+            named_store_id = self._allowed_store(user, row["store_id"])
+            if store_id is not None and store_id != named_store_id:
+                raise ApiError("所选门店与当前页面门店不一致", 403, 40300)
+            store_id = named_store_id
+        if store_id is None:
+            raise ApiError(
+                "请先选择具体门店后加载客户、房间和业务选项；全部门店仅可汇总查询",
+                400,
+                40000,
+            )
+        customers = execute_all(
+            connection,
+            """
+            SELECT DISTINCT customer.customer_id AS id, customer.name,
+                   room.room_no AS room
+            FROM room_bookings booking
+            JOIN customers customer ON customer.customer_id=booking.customer_id
+            JOIN rooms room ON room.room_id=booking.room_id
+            WHERE booking.tenant_id=%s AND booking.store_id=%s
+              AND booking.deleted_at IS NULL AND booking.status='已入住'
+            ORDER BY room.floor, room.layout_order, customer.name
+            """,
+            (user["tenant_id"], store_id),
+        )
+        rooms = execute_all(
+            connection,
+            """
+            SELECT room.room_id AS id, room.room_no AS room,
+                   room.room_type AS roomType
+            FROM rooms room
+            WHERE room.tenant_id=%s AND room.store_id=%s
+              AND room.deleted_at IS NULL
+            ORDER BY room.floor, room.layout_order, room.room_no
+            """,
+            (user["tenant_id"], store_id),
+        )
+        result = {"storeId": store_id, "customers": customers, "rooms": rooms}
+        if module_code == "DIET":
+            result["dishes"] = execute_all(
+                connection,
+                """
+                SELECT dish_id AS id, name
+                FROM meal_dishes
+                WHERE tenant_id=%s AND deleted_at IS NULL
+                  AND status IN ('启用','ACTIVE')
+                ORDER BY name
+                LIMIT 500
+                """,
+                (user["tenant_id"],),
+            )
+            result["mealPlans"] = execute_all(
+                connection,
+                """
+                SELECT plan_id AS id, name
+                FROM meal_plans
+                WHERE tenant_id=%s AND store_id=%s AND deleted_at IS NULL
+                ORDER BY name
+                LIMIT 500
+                """,
+                (user["tenant_id"], store_id),
+            )
+        if module_code == "INVENTORY":
+            result["materials"] = execute_all(
+                connection,
+                """
+                SELECT item.item_id AS id, item.name, item.unit
+                FROM inventory inv
+                JOIN items item ON item.item_id=inv.item_id
+                 AND item.tenant_id=inv.tenant_id
+                WHERE inv.tenant_id=%s AND inv.store_id=%s
+                ORDER BY item.name
+                LIMIT 1000
+                """,
+                (user["tenant_id"], store_id),
+            )
+            result["suppliers"] = execute_all(
+                connection,
+                """
+                SELECT DISTINCT purchase.supplier AS name
+                FROM purchase_orders purchase
+                WHERE purchase.tenant_id=%s AND purchase.store_id=%s
+                  AND purchase.deleted_at IS NULL
+                  AND purchase.supplier IS NOT NULL AND purchase.supplier<>''
+                ORDER BY purchase.supplier
+                LIMIT 500
+                """,
+                (user["tenant_id"], store_id),
+            )
+        return self._success(result)
+
+    def _validate_diet_room_assignment(
+        self,
+        connection,
+        user: dict,
+        resource: str,
+        store_id: int,
+        payload: dict,
+    ) -> None:
+        if resource not in {
+            "customer-meal-plans", "meal-orders", "guest-meal-supply"
+        }:
+            return
+        room = str(payload.get("room") or "").strip()
+        requires_room = (
+            resource == "customer-meal-plans"
+            or payload.get("customerType") == "入住客户"
+        )
+        if requires_room and not room:
+            raise ApiError("请选择当前门店在住客户房间", 400, 40000)
+        if not room:
+            return
+        row = execute_one(
+            connection,
+            """
+            SELECT customer.name AS customer_name
+            FROM room_bookings booking
+            JOIN rooms room ON room.room_id=booking.room_id
+            JOIN customers customer ON customer.customer_id=booking.customer_id
+            WHERE booking.tenant_id=%s AND booking.store_id=%s
+              AND booking.deleted_at IS NULL AND booking.status='已入住'
+              AND room.room_no=%s
+            LIMIT 1
+            """,
+            (user["tenant_id"], store_id, room),
+        )
+        if not row:
+            raise ApiError(
+                "所选房间不属于当前门店，或当前没有入住客户",
+                400,
+                40000,
+            )
+        customer_name = str(payload.get("customerName") or "").strip()
+        if customer_name and customer_name != row["customer_name"]:
+            raise ApiError(
+                "所选房间的入住客户与填写客户不一致，请从房间列表重新选择",
+                400,
+                40000,
+            )
+    def _asset_store_rows(self, connection, user: dict, alias: str, column: str = "store_id") -> tuple[str, list]:
+        clause, params = self._store_clause(user, alias)
+        if column != "store_id":
+            clause = clause.replace(f"{alias}.store_id", f"{alias}.{column}")
+        return clause, params
+
+    def _asset_customer(self, connection, user: dict, customer_id: object, store_id: int) -> dict:
+        try:
+            normalized = int(customer_id)
+        except (TypeError, ValueError) as exc:
+            raise ApiError("请选择当前门店的会员", 400, 40000) from exc
+        row = execute_one(
+            connection,
+            """SELECT customer_id, name, phone FROM customers
+               WHERE tenant_id=%s AND customer_id=%s
+                  AND deleted_at IS NULL""",
+            (user["tenant_id"], normalized),
+        )
+        if not row:
+            raise ApiError("会员不存在或已停用", 400, 40000)
+        return row
+
+    def _get_member_asset_resource(self, connection, user: dict, resource: str, query: dict):
+        if resource == "/options":
+            customers = execute_all(
+                connection,
+                f"""SELECT c.customer_id AS id, c.name, c.phone, s.name AS store
+                    FROM customers c JOIN stores s ON s.store_id=c.store_id
+                    WHERE c.tenant_id=%s AND c.deleted_at IS NULL
+                    ORDER BY c.customer_id DESC LIMIT 500""",
+                [user["tenant_id"]],
+            )
+            for customer in customers:
+                customer["phone"] = self._masked_phone(user, customer.get("phone"))
+            return self._success({"customers": customers, "cardTypes": ["次卡", "储值卡"], "cardPackages": []})
+        if resource == "/overview":
+            clause, params = self._asset_store_rows(connection, user, "a", "issue_store_id")
+            cards = execute_one(
+                connection,
+                f"""SELECT COUNT(*) AS activeCards, COALESCE(SUM(balance),0) AS cardBalance
+                    FROM member_asset_cards a
+                    JOIN customers c ON c.customer_id=a.customer_id
+                    WHERE a.tenant_id=%s AND c.deleted_at IS NULL
+                      AND a.status='正常' AND a.deleted_at IS NULL AND {clause}""",
+                [user["tenant_id"], *params],
+            ) or {}
+            accounts = execute_one(
+                connection,
+                f"""SELECT COALESCE(SUM(balance),0) AS accountBalance
+                    FROM member_asset_accounts a
+                    JOIN customers c ON c.customer_id=a.customer_id
+                    WHERE a.tenant_id=%s AND c.deleted_at IS NULL
+                      AND a.status='正常'""",
+                [user["tenant_id"]],
+            ) or {}
+            return self._success({**cards, **accounts})
+        if resource == "/cards":
+            clause, params = self._asset_store_rows(connection, user, "a", "issue_store_id")
+            rows = execute_all(
+                connection,
+                f"""SELECT a.card_id AS id, a.card_no, c.name AS customer_name,
+                    a.card_name, a.card_type, a.balance, a.total_count,
+                    a.remaining_count, a.valid_to,
+                    a.status, s.name AS store_name
+                    FROM member_asset_cards a
+                    JOIN customers c ON c.customer_id=a.customer_id
+                    JOIN stores s ON s.store_id=a.issue_store_id
+                    WHERE a.tenant_id=%s AND c.deleted_at IS NULL
+                      AND a.deleted_at IS NULL AND {clause}
+                    ORDER BY a.card_id DESC LIMIT 1000""",
+                [user["tenant_id"], *params],
+            )
+            return self._success({"list": rows, "total": len(rows)})
+        if resource == "/accounts":
+            rows = execute_all(
+                connection,
+                f"""SELECT a.account_id AS id, a.account_no, c.name AS customer_name,
+                    c.phone AS mobile, s.name AS store_name, a.balance,
+                    a.frozen_amount, a.points,
+                    a.status
+                    FROM member_asset_accounts a
+                    JOIN customers c ON c.customer_id=a.customer_id
+                    JOIN stores s ON s.store_id=c.store_id
+                    WHERE a.tenant_id=%s AND c.deleted_at IS NULL
+                    ORDER BY a.account_id DESC LIMIT 1000""",
+                [user["tenant_id"]],
+            )
+            for row in rows:
+                row["mobile"] = self._masked_phone(user, row.get("mobile"))
+            return self._success({"list": rows, "total": len(rows)})
+        raise ApiError("会员资产资源不存在", 404, 40400)
+
+    def _asset_amount(self, value: object) -> Decimal:
+        try:
+            amount = Decimal(str(value))
+        except Exception as exc:
+            raise ApiError("金额必须为大于 0 的数字", 400, 40000) from exc
+        if amount <= 0 or amount > Decimal("99999999.99"):
+            raise ApiError("金额必须在 0 到 99999999.99 之间", 400, 40000)
+        return amount.quantize(Decimal("0.0001"))
+
+    def _asset_write_store(self, user: dict, body: dict) -> int:
+        store_id = self._require_selected_write_store(user, body)
+        if not store_id:
+            raise ApiError("请先选择具体门店再办理会员资产交易", 400, 40000)
+        return store_id
+
+    def _post_member_asset_resource(self, connection, user: dict, resource: str, body: dict):
+        store_id = self._asset_write_store(user, body)
+        if resource == "/cards":
+            return self._create_member_asset_card(connection, user, body, store_id)
+        match = re.fullmatch(r"/(cards|accounts)/(\d+)/(consume|top-up|deduct)", resource)
+        if not match:
+            raise ApiError("会员资产写入资源不存在", 404, 40400)
+        collection, record_id, action = match.groups()
+        if collection == "cards" and action == "consume":
+            return self._consume_member_asset_card(connection, user, int(record_id), body, store_id)
+        if collection == "accounts" and action in {"top-up", "deduct"}:
+            return self._adjust_member_asset_account(connection, user, int(record_id), action, body, store_id)
+        raise ApiError("当前会员资产操作不支持", 400, 40000)
+
+    def _create_member_asset_card(self, connection, user: dict, body: dict, store_id: int):
+        customer = self._asset_customer(connection, user, body.get("customerId"), store_id)
+        card_type = str(body.get("cardType") or "").strip()
+        if card_type not in {"次卡", "储值卡"}:
+            raise ApiError("卡类型仅支持次卡或储值卡", 400, 40000)
+        valid_to = str(body.get("validTo") or "").strip()
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", valid_to):
+            raise ApiError("请填写有效期", 400, 40000)
+        amount = self._asset_amount(body.get("amount"))
+        count = int(body.get("totalCount") or 0)
+        if card_type == "次卡" and (count < 1 or count > 100000):
+            raise ApiError("次卡总次数必须在 1 到 100000 之间", 400, 40000)
+        if card_type == "储值卡":
+            count = 0
+        card_no = self._sales_number("ASSET")
+        card_name = str(body.get("cardName") or body.get("packageName") or f"{card_type}资产卡").strip()[:128]
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """INSERT IGNORE INTO member_asset_accounts(tenant_id,customer_id,account_no,status)
+                   VALUES(%s,%s,%s,'正常')""",
+                (user["tenant_id"], customer["customer_id"], self._sales_number("ACCOUNT")),
+            )
+            cursor.execute(
+                """INSERT INTO member_asset_cards(tenant_id,issue_store_id,customer_id,card_no,card_name,card_type,issue_amount,balance,total_count,remaining_count,valid_to,status,created_by_user_id)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'正常',%s)""",
+                (user["tenant_id"], store_id, customer["customer_id"], card_no, card_name, card_type, amount, amount if card_type == "储值卡" else 0, count, count, valid_to, user["user_id"]),
+            )
+            card_id = cursor.lastrowid
+            cursor.execute(
+                """INSERT INTO member_asset_transactions(tenant_id,store_id,customer_id,card_id,transaction_no,transaction_type,amount,count_delta,balance_after,remaining_count_after,remark,operator_user_id)
+                   VALUES(%s,%s,%s,%s,%s,'ISSUE',%s,%s,%s,%s,%s,%s)""",
+                (user["tenant_id"], store_id, customer["customer_id"], card_id, self._sales_number("ASSET-TX"), amount, count, amount if card_type == "储值卡" else 0, count, "发卡", user["user_id"]),
+            )
+        self._audit(connection, user, "member_asset_card", card_id, "CREATE", store_id, None, "正常", {"cardNo": card_no, "cardType": card_type})
+        connection.commit()
+        return self._success({"id": card_id, "cardNo": card_no, "saved": True})
+
+    def _consume_member_asset_card(self, connection, user: dict, card_id: int, body: dict, store_id: int):
+        row = execute_one(connection, "SELECT * FROM member_asset_cards WHERE card_id=%s AND tenant_id=%s AND deleted_at IS NULL FOR UPDATE", (card_id, user["tenant_id"]))
+        if not row or row["status"] != "正常":
+            raise ApiError("资产卡不存在或已停用", 404, 40400)
+        amount = self._asset_amount(body.get("amount")) if row["card_type"] == "储值卡" else Decimal("0")
+        count = int(body.get("count") or 1) if row["card_type"] == "次卡" else 0
+        if count < 1 or count > int(row["remaining_count"]):
+            raise ApiError("核销次数超过剩余次数", 400, 40000)
+        if amount > Decimal(str(row["balance"])):
+            raise ApiError("扣款金额超过可用余额", 400, 40000)
+        balance = Decimal(str(row["balance"])) - amount
+        remaining = int(row["remaining_count"]) - count
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE member_asset_cards SET balance=%s, remaining_count=%s WHERE card_id=%s", (balance, remaining, card_id))
+            cursor.execute("""INSERT INTO member_asset_transactions(tenant_id,store_id,customer_id,card_id,transaction_no,transaction_type,amount,count_delta,balance_after,remaining_count_after,remark,operator_user_id) VALUES(%s,%s,%s,%s,%s,'CONSUME',%s,%s,%s,%s,%s,%s)""", (user["tenant_id"], store_id, row["customer_id"], card_id, self._sales_number("ASSET-TX"), -amount, -count, balance, remaining, "资产核销", user["user_id"]))
+        self._audit(connection, user, "member_asset_card", card_id, "CONSUME", store_id, None, None, {"amount": str(amount), "count": count})
+        connection.commit()
+        return self._success({"id": card_id, "balance": balance, "remainingCount": remaining})
+
+    def _adjust_member_asset_account(self, connection, user: dict, account_id: int, action: str, body: dict, store_id: int):
+        row = execute_one(connection, "SELECT * FROM member_asset_accounts WHERE account_id=%s AND tenant_id=%s FOR UPDATE", (account_id, user["tenant_id"]))
+        if not row or row["status"] != "正常":
+            raise ApiError("余额账户不存在或已停用", 404, 40400)
+        amount = self._asset_amount(body.get("amount"))
+        before = Decimal(str(row["balance"]))
+        if action == "deduct" and amount > before:
+            raise ApiError("扣款金额超过可用余额", 400, 40000)
+        balance = before + amount if action == "top-up" else before - amount
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE member_asset_accounts SET balance=%s WHERE account_id=%s", (balance, account_id))
+            cursor.execute("""INSERT INTO member_asset_transactions(tenant_id,store_id,customer_id,account_id,transaction_no,transaction_type,amount,balance_after,remark,operator_user_id) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", (user["tenant_id"], store_id, row["customer_id"], account_id, self._sales_number("ASSET-TX"), "TOP_UP" if action == "top-up" else "DEDUCT", amount if action == "top-up" else -amount, balance, "余额充值" if action == "top-up" else "余额扣款", user["user_id"]))
+        self._audit(connection, user, "member_asset_account", account_id, action.upper(), store_id, str(before), str(balance), {})
+        connection.commit()
+        return self._success({"id": account_id, "balance": balance})
 
     def _get_diet_module_data(
         self, connection, user: dict, resource: str, query: dict
@@ -4322,7 +7512,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         }
         if resource not in supported:
             raise ApiError("膳食资源不存在", 404, 40400)
-        clause, params = self._store_clause(user, "dp")
+        clause, params = self._scoped_store_clause(user, query, "dp")
         if resource == "customer-meal-plans":
             rows = execute_all(
                 connection,
@@ -4359,7 +7549,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                        name AS dishName, category AS dishCategory,
                        NULL AS mealType, NULL AS ingredients,
                        nutrients AS nutrition, NULL AS tabooTag,
-                       '份' AS unit, 0 AS standardPrice, NULL AS store,
+                       '份' AS unit, 0 AS standardPrice,
+                       '租户共享餐库' AS store,
                        status AS enabled, NULL AS creator,
                        created_at AS createdAt
                 FROM meal_dishes
@@ -4370,7 +7561,9 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 (user["tenant_id"],),
             )
         elif resource == "diet-packages":
-            package_clause, package_params = self._store_clause(user, "mp")
+            package_clause, package_params = self._scoped_store_clause(
+                user, query, "mp"
+            )
             rows = execute_all(
                 connection,
                 f"""
@@ -4429,7 +7622,15 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             )
         else:
             rows = []
-        return self._success({"list": rows, "total": len(rows)})
+        data = self._merge_operational_module_rows(
+            connection,
+            user,
+            "DIET",
+            resource,
+            query,
+            {"list": rows, "total": len(rows), "source": "mysql"},
+        )
+        return self._success(data)
 
     def _catalog_date(
         self,
@@ -4576,6 +7777,9 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                        rt.name AS roomType,
                        pr.stay_days AS stayDays,
                        pr.reference_amount AS referenceAmount,
+                       COALESCE(profile.original_amount,pr.reference_amount) AS originalPrice,
+                       COALESCE(profile.activity_amount,pr.reference_amount) AS activityPrice,
+                       COALESCE(profile.deal_amount,pr.reference_amount) AS dealPrice,
                        pr.currency_code AS currencyCode,
                        pr.effective_from AS effectiveFrom,
                        pr.effective_to AS effectiveTo,
@@ -4583,6 +7787,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 FROM package_price_rules pr
                 JOIN stores s ON s.store_id=pr.store_id
                 JOIN room_types rt ON rt.room_type_id=pr.room_type_id
+                LEFT JOIN package_price_profiles profile
+                  ON profile.price_rule_id=pr.price_rule_id
                 WHERE {' AND '.join(price_conditions)}
                 ORDER BY s.sort_weight DESC,s.store_id,rt.sort_order,
                          pr.stay_days,pr.effective_from
@@ -5375,6 +8581,11 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         loader = loaders.get(resource)
         if not loader:
             raise ApiError("销售资源不存在", 404, 40400)
+        # The request dispatcher has already narrowed `user` when a concrete
+        # storeId is selected.  Keep the administrator's full store scope for
+        # storeId=all so contract lists can be used as an aggregate query.
+        # Write operations still require a concrete store through
+        # `_require_selected_write_store`.
         rows = loader(connection, user, query or {})
         return self._success(
             {
@@ -5414,15 +8625,14 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                    COALESCE(entitlement_summary.entitlementCount,0)
                      AS entitlementCount,
                    c.phone AS mobile, c.status AS arrivalStatus,
-                   CASE WHEN rb.status='已入住' THEN '是' ELSE '否' END
-                     AS checkedIn,
+                   COALESCE(booking_summary.checkedIn,'否') AS checkedIn,
                    ct.status AS auditStatus,
                    owner.name AS salesperson,
                    ct.amount AS dealAmount, ct.paid AS receivedAmount,
                    0 AS refundAmount,
                    GREATEST(ct.amount-ct.paid,0) AS debtAmount,
-                   COALESCE(SUM(CASE WHEN fr.status='待审核'
-                     THEN fr.amount ELSE 0 END),0) AS unpostedAmount,
+                   COALESCE(receipt_summary.unpostedAmount,0)
+                     AS unpostedAmount,
                    GREATEST(COALESCE(ct.reference_amount,ct.amount)-ct.amount,0)
                      AS discountAmount,
                    0 AS postPaymentDiscount,
@@ -5432,7 +8642,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                    ROUND(ct.discount_rate*100,2) AS discountRate,
                    ext.due_date AS dueDate,
                    ct.sign_date AS signedAt,
-                   ext.room_type AS roomType, r.room_no AS room,
+                   ext.room_type AS roomType, booking_summary.room AS room,
                    ct.expected_check_in AS checkInAt,
                    ct.expected_check_out AS checkOutAt,
                    ct.amount AS finalAmount,
@@ -5452,11 +8662,21 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             LEFT JOIN user_accounts creator
               ON creator.user_id=ct.created_by_user_id
             LEFT JOIN stores s ON s.store_id=ct.store_id
-            LEFT JOIN finance_receipts fr ON fr.contract_id=ct.contract_id
+            LEFT JOIN (
+              SELECT contract_id,
+                     SUM(CASE WHEN status='待审核' THEN amount ELSE 0 END)
+                       AS unpostedAmount
+              FROM finance_receipts
+              GROUP BY contract_id
+            ) receipt_summary ON receipt_summary.contract_id=ct.contract_id
             LEFT JOIN sales_contract_extensions ext
               ON ext.contract_id=ct.contract_id
             LEFT JOIN contract_package_snapshots cps
-              ON cps.contract_id=ct.contract_id
+              ON cps.package_snapshot_id=(
+                SELECT MAX(snapshot.package_snapshot_id)
+                FROM contract_package_snapshots snapshot
+                WHERE snapshot.contract_id=ct.contract_id
+              )
             LEFT JOIN (
               SELECT contract_id,COUNT(*) AS entitlementCount
               FROM customer_service_entitlements
@@ -5464,14 +8684,19 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
               GROUP BY contract_id
             ) entitlement_summary
               ON entitlement_summary.contract_id=ct.contract_id
-            LEFT JOIN room_bookings rb
-              ON rb.contract_id=ct.contract_id
-             AND rb.deleted_at IS NULL
-             AND rb.status IN ('已订房','已入住')
-            LEFT JOIN rooms r ON r.room_id=rb.room_id
+            LEFT JOIN (
+              SELECT rb.contract_id,
+                     IF(MAX(rb.status='已入住')=1,'是','否') AS checkedIn,
+                     GROUP_CONCAT(DISTINCT r.room_no ORDER BY r.room_no
+                       SEPARATOR ' / ') AS room
+              FROM room_bookings rb
+              LEFT JOIN rooms r ON r.room_id=rb.room_id
+              WHERE rb.deleted_at IS NULL
+                AND rb.status IN ('已订房','已入住')
+              GROUP BY rb.contract_id
+            ) booking_summary ON booking_summary.contract_id=ct.contract_id
             WHERE ct.tenant_id=%s AND ct.deleted_at IS NULL
               AND {clause}
-            GROUP BY ct.contract_id
             ORDER BY ct.contract_id DESC
             LIMIT 500
             """,
@@ -5617,7 +8842,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         return rows
 
     def _sales_bundle_rows(
-        self, connection, user: dict, domain: str
+        self, connection, user: dict, domain: str, query: dict | None = None
     ) -> list:
         clause, params = self._store_clause(user, "ext")
         rows = execute_all(
@@ -5625,6 +8850,9 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             f"""
             SELECT b.bundle_id AS id, ext.bundle_no,
                    b.name, b.price AS packageAmount,
+                   ext.reference_price AS originalPrice,
+                   ext.activity_price AS activityPrice,
+                   ext.effective_date AS effectiveDate,
                    ext.room_type AS roomType,
                    ext.audit_status AS auditStatus,
                    b.status AS enabled,
@@ -5674,12 +8902,137 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
     def _sales_package_rows(
         self, connection, user: dict, query: dict
     ) -> list:
-        return self._sales_bundle_rows(connection, user, "月子套餐")
+        legacy_rows = self._sales_bundle_rows(
+            connection, user, "月子套餐", query
+        )
+        for row in legacy_rows:
+            base_name = str(row.get("packageName") or "").strip()
+            nursing_type = str(
+                row.pop("cardType", "") or row.get("nursingType") or ""
+            ).strip()
+            row["basePackageName"] = base_name
+            row["nursingType"] = nursing_type
+            row["packageDays"] = int(row.get("validDays") or 0)
+            row["packageDisplayName"] = (
+                f"{base_name}（{nursing_type}）"
+                if nursing_type and nursing_type != "未注明"
+                else base_name
+            )
+            row["selectionKey"] = f"legacy:{row['id']}"
+            row["catalogOnly"] = False
+
+        # Confirmed package catalogs are the source of truth for store/package
+        # selection.  Older sales pages, however, only read ``item_bundles``.
+        # Project catalog versions that have no store-local legacy bundle into
+        # this read model instead of manufacturing a second writable record.
+        # ``id`` deliberately stays NULL: catalog ids must never be sent to the
+        # legacy bundle edit/delete endpoints.
+        clause, params = self._store_clause(user, "pr")
+        catalog_rows = execute_all(
+            connection,
+            f"""
+            SELECT NULL AS id,
+                   CONCAT('catalog:',pv.package_version_id,':',pr.store_id,':',
+                          pr.stay_days) AS selectionKey,
+                   pp.package_id AS packageId,
+                   pv.package_version_id AS packageVersionId,
+                   MIN(pr.price_rule_id) AS packagePriceRuleId,
+                   CONCAT(pp.package_code,'@',pr.stay_days) AS packageNo,
+                   pp.package_name AS packageName,
+                   pp.package_name AS basePackageName,
+                   CASE pp.package_code
+                     WHEN 'HH-BASE' THEN '基础护理'
+                     WHEN 'HH-BASE-721' THEN '7天一对一+21天团队护理'
+                     WHEN 'HH-REPAIR' THEN '产后修复'
+                     WHEN 'HH-REPAIR-721' THEN '7天一对一+21天团队护理'
+                     WHEN 'HH-RECOVERY' THEN '修养护理'
+                     WHEN 'HH-QUEEN' THEN '专属护理'
+                     WHEN 'HH-PRESIDENT' THEN '专属护理'
+                     ELSE ''
+                   END AS nursingType,
+                   pr.stay_days AS packageDays,
+                   pr.stay_days AS validDays,
+                   GROUP_CONCAT(DISTINCT rt.name ORDER BY rt.sort_order
+                                SEPARATOR '、') AS roomType,
+                   MIN(COALESCE(profile.original_amount,
+                                pr.reference_amount)) AS originalPrice,
+                   MIN(COALESCE(profile.activity_amount,
+                                pr.reference_amount)) AS activityPrice,
+                   MIN(COALESCE(profile.deal_amount,
+                                pr.reference_amount)) AS dealPrice,
+                   MIN(COALESCE(profile.deal_amount,
+                                pr.reference_amount)) AS packageAmount,
+                   MIN(pr.effective_from) AS effectiveDate,
+                   '审核通过' AS auditStatus,
+                   '启用' AS enabled,
+                   '是' AS visible,
+                   '否' AS recommended,
+                   '甲方确认套餐目录' AS creator,
+                   s.name AS store,
+                   pv.source_type AS sourceType,
+                   '标准套餐目录（只读）；通过“添加”生成销售套餐配置' AS dataStatus,
+                   1 AS catalogOnly
+            FROM package_products pp
+            JOIN package_versions pv ON pv.package_id=pp.package_id
+            JOIN package_price_rules pr
+              ON pr.package_version_id=pv.package_version_id
+            JOIN stores s ON s.store_id=pr.store_id
+            JOIN room_types rt ON rt.room_type_id=pr.room_type_id
+            LEFT JOIN package_price_profiles profile
+              ON profile.price_rule_id=pr.price_rule_id
+            LEFT JOIN item_bundles mapped_legacy
+              ON mapped_legacy.bundle_id=COALESCE(
+                   pv.legacy_bundle_id,pp.legacy_bundle_id
+                 )
+             AND mapped_legacy.tenant_id=pp.tenant_id
+             AND mapped_legacy.domain='月子套餐'
+             AND mapped_legacy.deleted_at IS NULL
+            LEFT JOIN sales_bundle_extensions mapped_ext
+              ON mapped_ext.bundle_id=mapped_legacy.bundle_id
+             AND mapped_ext.store_id=pr.store_id
+            LEFT JOIN sales_bundle_extensions legacy_ext
+              ON legacy_ext.store_id=pr.store_id
+             AND legacy_ext.days=pr.stay_days
+            LEFT JOIN item_bundles legacy
+              ON legacy.bundle_id=legacy_ext.bundle_id
+             AND legacy.tenant_id=pp.tenant_id
+             AND legacy.domain='月子套餐'
+             AND legacy.name=pp.package_name
+             AND legacy.deleted_at IS NULL
+            WHERE pp.tenant_id=%s AND pp.deleted_at IS NULL
+              AND pp.status='ACTIVE' AND pv.version_status='ACTIVE'
+              AND pr.status='ACTIVE'
+              AND pv.effective_from<=CURDATE()
+              AND (pv.effective_to IS NULL OR pv.effective_to>=CURDATE())
+              AND pr.effective_from<=CURDATE()
+              AND (pr.effective_to IS NULL OR pr.effective_to>=CURDATE())
+              AND mapped_ext.bundle_id IS NULL
+              AND legacy.bundle_id IS NULL
+              AND {clause}
+            GROUP BY pp.package_id,pp.package_code,pp.package_name,
+                     pv.package_version_id,pv.source_type,pr.store_id,s.name,
+                     pr.stay_days,pp.sort_order
+            ORDER BY s.sort_weight DESC,s.store_id,pp.sort_order,
+                     pp.package_name,pr.stay_days
+            """,
+            [user["tenant_id"], *params],
+        )
+        for row in catalog_rows:
+            base_name = str(row.get("basePackageName") or "").strip()
+            nursing_type = str(row.get("nursingType") or "").strip()
+            row["packageDisplayName"] = (
+                f"{base_name}（{nursing_type}）"
+                if nursing_type and nursing_type != "未注明"
+                else base_name
+            )
+            row["lineItems"] = []
+            row["catalogOnly"] = True
+        return [*legacy_rows, *catalog_rows]
 
     def _sales_card_package_rows(
         self, connection, user: dict, query: dict
     ) -> list:
-        return self._sales_bundle_rows(connection, user, "卡类套餐")
+        return self._sales_bundle_rows(connection, user, "卡类套餐", query)
 
     def _sales_gift_list_rows(
         self, connection, user: dict, query: dict
@@ -5725,18 +9078,45 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             f"""
             SELECT cp.coupon_id AS id, cp.code AS discountNo,
                    c.name AS customerName, c.phone AS mobile,
-                   COALESCE(tpl.name,cp.type) AS couponName,
+                   COALESCE(ext.coupon_name,tpl.name,cp.type) AS couponName,
                    cp.type AS couponType, tpl.benefit_kind AS itemType,
                    1 AS quantity, cp.benefit AS couponAmount,
+                   GREATEST(cp.benefit-ext.remaining_amount,0) AS usedAmount,
                    ext.remaining_amount AS remainingAmount,
                    ext.valid_days AS validDays,
-                   cp.expire_date AS deadline,
+                   ext.starts_at AS startsAt, cp.expire_date AS endsAt,
+                   cp.expire_date AS deadline, cp.order_ref AS saleNo,
+                   cp.used_at AS usedAt,
                    ext.audit_status AS auditStatus,
                    auditor.username AS auditor,
                    ext.audit_remark AS auditRemark, ext.remark,
                    creator.username AS creator, cp.created_at AS createdAt,
-                   s.name AS store, cp.status,
-                   ext.disable_reason AS disableReason
+                   s.name AS store,
+                   CASE
+                     WHEN cp.status IN ('未使用','部分使用')
+                       AND cp.expire_date IS NOT NULL
+                       AND LEFT(cp.expire_date,10)<CURDATE()
+                     THEN '已过期'
+                     ELSE cp.status
+                   END AS status,
+                   ext.disable_reason AS disableReason,
+                   (
+                     SELECT GROUP_CONCAT(
+                       CONCAT(
+                         DATE_FORMAT(op.created_at,'%%m-%%d %%H:%%i'),
+                         ' ',
+                         op.action_name
+                       )
+                       ORDER BY op.operation_id SEPARATOR '；'
+                     )
+                     FROM sales_operation_records op
+                     WHERE op.tenant_id=cp.tenant_id
+                       AND op.resource_key='discounts'
+                       AND op.record_key=(
+                         CAST(cp.coupon_id AS CHAR)
+                         COLLATE utf8mb4_unicode_ci
+                       )
+                   ) AS operationTrail
             FROM coupons cp
             JOIN sales_coupon_extensions ext ON ext.coupon_id=cp.coupon_id
             LEFT JOIN coupon_templates tpl ON tpl.tpl_id=cp.tpl_id
@@ -5768,10 +9148,13 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                    tpl.benefit_kind AS itemType,
                    tpl.benefit AS couponAmount, s.name AS store,
                    ext.starts_at AS startsAt, ext.ends_at AS endsAt,
-                   tpl.total_qty AS totalQuantity,
-                   tpl.issued_qty AS issuedQuantity,
-                   ext.limit_per_customer AS limitPerCustomer,
-                   creator.username AS creator,
+                    tpl.total_qty AS totalQuantity,
+                    tpl.issued_qty AS issuedQuantity,
+                    GREATEST(tpl.total_qty-tpl.issued_qty,0)
+                      AS remainingQuantity,
+                    ext.limit_per_customer AS limitPerCustomer,
+                    tpl.status,
+                    creator.username AS creator,
                    tpl.created_at AS createdAt
             FROM coupon_templates tpl
             JOIN sales_coupon_template_extensions ext ON ext.tpl_id=tpl.tpl_id
@@ -5874,18 +9257,26 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
     ) -> int:
         explicit_id = body.get("storeId")
         if explicit_id:
-            return self._allowed_store(user, explicit_id)
+            store_id = self._allowed_store(user, explicit_id)
+            self._require_selected_write_store(user, body, store_id)
+            return store_id
         requested = str(body.get("store") or "").strip()
         if requested and requested != "全部":
             for store in self._sales_store_options(connection, user):
                 if self._room_store_matches(requested, store["name"]):
-                    return int(store["id"])
+                    store_id = int(store["id"])
+                    self._require_selected_write_store(user, body, store_id)
+                    return store_id
             raise ApiError("当前账号无权访问所选门店", 403, 40300)
         default_id = user.get("default_store_id")
         if default_id:
-            return self._allowed_store(user, default_id)
+            store_id = self._allowed_store(user, default_id)
+            self._require_selected_write_store(user, body, store_id)
+            return store_id
         if len(user["store_ids"]) == 1:
-            return int(user["store_ids"][0])
+            store_id = int(user["store_ids"][0])
+            self._require_selected_write_store(user, body, store_id)
+            return store_id
         raise ApiError("请选择销售门店")
 
     def _sales_customer(
@@ -5907,6 +9298,10 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             phone = str(body.get("mobile") or "").strip()
             if not name:
                 raise ApiError("请选择现有客户")
+            if len(name) > 30:
+                raise ApiError("客户姓名不能超过30个字符")
+            if not re.fullmatch(r"1[3-9]\d{9}", phone):
+                raise ApiError("手机号须为中国大陆11位手机号")
             row = execute_one(
                 connection,
                 """
@@ -5924,6 +9319,22 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             raise ApiError("客户所属门店与销售门店不一致")
         self._allowed_store(user, row["store_id"])
         return row
+
+    def _sales_text(
+        self,
+        body: dict,
+        key: str,
+        label: str,
+        *,
+        required: bool = False,
+        max_length: int = 500,
+    ) -> str:
+        value = str(body.get(key) or "").strip()
+        if required and not value:
+            raise ApiError(f"{label}不能为空")
+        if len(value) > max_length:
+            raise ApiError(f"{label}不能超过{max_length}个字符")
+        return value
 
     def _sales_decimal(
         self, body: dict, key: str, default=0, positive: bool = False
@@ -6819,6 +10230,14 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         if not name:
             raise ApiError("套餐名称不能为空")
         amount = self._sales_decimal(body, "packageAmount", positive=True)
+        if resource == "packages":
+            days = int(body.get("packageDays") or body.get("validDays") or 0)
+            original_price = self._sales_decimal(body, "originalPrice", positive=True)
+            activity_price = self._sales_decimal(body, "activityPrice", positive=True)
+            if days <= 0 or days > 365:
+                raise ApiError("套餐天数须为 1 至 365 的整数")
+            if original_price < activity_price or activity_price < amount:
+                raise ApiError("套餐价格须满足原价≥活动价≥成交价")
         domain = "月子套餐" if resource == "packages" else "卡类套餐"
         sub_type = (
             body.get("packageType")
@@ -6900,15 +10319,16 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 """
                 INSERT INTO sales_bundle_extensions(
                   bundle_id,store_id,bundle_no,bundle_type,days,
-                  reference_price,room_type,audit_status,enabled_at,
+                  reference_price,activity_price,effective_date,room_type,audit_status,enabled_at,
                   recommended,visible,deadline,details,room_info,
                   created_by_user_id
                 ) VALUES (
-                  %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                  %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
                 )
                 ON DUPLICATE KEY UPDATE
                   store_id=VALUES(store_id),bundle_type=VALUES(bundle_type),
                   days=VALUES(days),reference_price=VALUES(reference_price),
+                  activity_price=VALUES(activity_price),effective_date=VALUES(effective_date),
                   room_type=VALUES(room_type),
                   audit_status=VALUES(audit_status),
                   enabled_at=VALUES(enabled_at),
@@ -6928,6 +10348,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     )
                     or None,
                     self._sales_decimal(body, "referencePrice"),
+                    self._sales_decimal(body, "activityPrice"),
+                    body.get("effectiveDate") or None,
                     body.get("roomType") or None,
                     audit_status,
                     body.get("enabledAt") or None,
@@ -7124,21 +10546,50 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             user, "coupons", "编辑" if tpl_id else "添加"
         )
         store_id = self._sales_store_id(connection, user, body)
-        name = str(body.get("couponName") or "").strip()
-        coupon_type = str(body.get("couponType") or "").strip()
-        if not name or not coupon_type:
-            raise ApiError("优惠券名称和类型不能为空")
+        name = self._sales_text(
+            body, "couponName", "优惠券名称", required=True, max_length=50
+        )
+        coupon_type = self._sales_text(
+            body, "couponType", "优惠券类型", required=True, max_length=30
+        )
         benefit = self._sales_decimal(body, "couponAmount", positive=True)
-        total_quantity = int(body.get("totalQuantity") or 0)
-        if total_quantity <= 0:
-            raise ApiError("优惠券数量必须大于0")
+        if benefit > Decimal("1000000"):
+            raise ApiError("优惠券金额不能超过1000000")
+        try:
+            total_quantity = int(body.get("totalQuantity") or 0)
+            valid_days = int(body.get("validDays") or 30)
+            limit_per_customer = int(body.get("limitPerCustomer") or 1)
+        except (TypeError, ValueError) as exc:
+            raise ApiError("优惠券数量或有效期格式不正确") from exc
+        if not 1 <= total_quantity <= 100000:
+            raise ApiError("优惠券数量须在1至100000之间")
+        if not 1 <= valid_days <= 3650:
+            raise ApiError("有效期须在1至3650天之间")
+        if not 1 <= limit_per_customer <= min(100, total_quantity):
+            raise ApiError("单客户限领数量须为1至100，且不能超过总数量")
+        starts_at = self._catalog_date(
+            body.get("startsAt"), "优惠开始时间", required=True
+        )
+        ends_at = self._catalog_date(
+            body.get("endsAt"), "优惠结束时间", required=True
+        )
+        if ends_at < starts_at:
+            raise ApiError("优惠结束时间不能早于开始时间")
+        if ends_at < date.today():
+            raise ApiError("优惠结束时间不能早于今天")
+        if not tpl_id and starts_at < date.today():
+            raise ApiError("优惠开始时间不能早于今天")
+        remark = self._sales_text(
+            body, "remark", "优惠券备注", max_length=500
+        )
         with connection.cursor() as cursor:
             if tpl_id:
                 clause, params = self._store_clause(user, "tpl")
                 existing = execute_one(
                     connection,
                     f"""
-                    SELECT tpl.tpl_id FROM coupon_templates tpl
+                    SELECT tpl.tpl_id,tpl.issued_qty
+                    FROM coupon_templates tpl
                     WHERE tpl.tpl_id=%s AND tpl.tenant_id=%s
                       AND tpl.deleted_at IS NULL AND {clause}
                     """,
@@ -7146,6 +10597,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 )
                 if not existing:
                     raise ApiError("优惠券模板不存在或无权访问", 404, 40400)
+                if total_quantity < int(existing["issued_qty"] or 0):
+                    raise ApiError("优惠券总数量不能小于已发放数量")
                 cursor.execute(
                     """
                     UPDATE coupon_templates
@@ -7158,7 +10611,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                         name,
                         coupon_type,
                         benefit,
-                        int(body.get("validDays") or 30),
+                        valid_days,
                         total_quantity,
                         tpl_id,
                     ),
@@ -7178,7 +10631,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                         name,
                         coupon_type,
                         benefit,
-                        int(body.get("validDays") or 30),
+                        valid_days,
                         body.get("limitType") or "金额",
                         total_quantity,
                     ),
@@ -7198,14 +10651,14 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 """,
                 (
                     tpl_id,
-                    body.get("couponNo") or f"YHQ-{tpl_id:06d}",
-                    body.get("startsAt") or None,
-                    body.get("endsAt") or None,
-                    int(body.get("limitPerCustomer") or 1),
+                    f"YHQ-{tpl_id:06d}",
+                    starts_at,
+                    ends_at,
+                    limit_per_customer,
                     body.get("scope") or "所有人",
                     body.get("sendType") or "店内发放",
                     int(bool(body.get("stackable"))),
-                    body.get("remark") or None,
+                    remark or None,
                     user["user_id"],
                 ),
             )
@@ -7232,21 +10685,46 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         store_id = self._sales_store_id(connection, user, body)
         customer = self._sales_customer(connection, user, body, store_id)
         benefit = self._sales_decimal(body, "couponAmount", positive=True)
-        coupon_type = str(body.get("couponType") or "").strip()
-        if not coupon_type:
-            raise ApiError("优惠券类型不能为空")
-        valid_days = int(body.get("validDays") or 0) or None
-        starts_at = body.get("startsAt") or None
-        ends_at = body.get("endsAt") or None
+        if benefit > Decimal("1000000"):
+            raise ApiError("优惠券金额不能超过1000000")
+        coupon_name = self._sales_text(
+            body, "couponName", "优惠券名称", required=True, max_length=50
+        )
+        coupon_type = self._sales_text(
+            body, "couponType", "优惠券类型", required=True, max_length=30
+        )
+        try:
+            valid_days = int(body.get("validDays") or 0) or None
+        except (TypeError, ValueError) as exc:
+            raise ApiError("有效期格式不正确") from exc
+        if valid_days is not None and not 1 <= valid_days <= 3650:
+            raise ApiError("有效期须在1至3650天之间")
+        starts_at = self._catalog_date(
+            body.get("startsAt"), "优惠开始时间"
+        )
+        ends_at = self._catalog_date(body.get("endsAt"), "优惠结束时间")
         if not ends_at and valid_days:
-            ends_at = (date.today() + timedelta(days=valid_days)).isoformat()
+            ends_at = date.today() + timedelta(days=valid_days)
+        if starts_at and ends_at and ends_at < starts_at:
+            raise ApiError("优惠结束时间不能早于开始时间")
+        if ends_at and ends_at < date.today():
+            raise ApiError("优惠结束时间不能早于今天")
+        if not coupon_id and starts_at and starts_at < date.today():
+            raise ApiError("优惠开始时间不能早于今天")
+        remark = self._sales_text(
+            body, "remark", "优惠券备注", max_length=500
+        )
         with connection.cursor() as cursor:
             if coupon_id:
                 clause, params = self._store_clause(user, "cp")
                 existing = execute_one(
                     connection,
                     f"""
-                    SELECT cp.coupon_id FROM coupons cp
+                    SELECT cp.coupon_id,cp.status,cp.benefit,
+                           ext.remaining_amount
+                    FROM coupons cp
+                    JOIN sales_coupon_extensions ext
+                      ON ext.coupon_id=cp.coupon_id
                     WHERE cp.coupon_id=%s AND cp.tenant_id=%s
                       AND {clause}
                     """,
@@ -7254,17 +10732,20 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 )
                 if not existing:
                     raise ApiError("优惠记录不存在或无权访问", 404, 40400)
+                if existing["status"] != "未使用" or Decimal(
+                    str(existing["remaining_amount"] or 0)
+                ) != Decimal(str(existing["benefit"] or 0)):
+                    raise ApiError("已使用、已核销或已停用的优惠券不能编辑")
                 cursor.execute(
                     """
                     UPDATE coupons
-                    SET store_id=%s,customer_id=%s,code=%s,type=%s,
+                    SET store_id=%s,customer_id=%s,type=%s,
                         benefit=%s,expire_date=%s,version=version+1
                     WHERE coupon_id=%s
                     """,
                     (
                         store_id,
                         customer["customer_id"],
-                        body.get("discountNo") or f"YH-{coupon_id:06d}",
                         coupon_type,
                         benefit,
                         ends_at,
@@ -7283,8 +10764,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                         user["tenant_id"],
                         store_id,
                         customer["customer_id"],
-                        body.get("discountNo")
-                        or self._sales_number("YH"),
+                        self._sales_number("YH"),
                         coupon_type,
                         benefit,
                         ends_at,
@@ -7294,20 +10774,22 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             cursor.execute(
                 """
                 INSERT INTO sales_coupon_extensions(
-                  coupon_id,audit_status,starts_at,remaining_amount,
+                  coupon_id,coupon_name,audit_status,starts_at,remaining_amount,
                   valid_days,remark,created_by_user_id
-                ) VALUES (%s,'待审核',%s,%s,%s,%s,%s)
+                ) VALUES (%s,%s,'待审核',%s,%s,%s,%s,%s)
                 ON DUPLICATE KEY UPDATE
+                  coupon_name=VALUES(coupon_name),
                   starts_at=VALUES(starts_at),
                   remaining_amount=VALUES(remaining_amount),
                   valid_days=VALUES(valid_days),remark=VALUES(remark)
                 """,
                 (
                     coupon_id,
+                    coupon_name,
                     starts_at,
                     benefit,
                     valid_days,
-                    body.get("remark") or None,
+                    remark or None,
                     user["user_id"],
                 ),
             )
@@ -7446,6 +10928,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
     def _perform_sales_action(
         self, connection, user: dict, resource: str, body: dict
     ):
+        self._require_selected_write_store(user, body)
         action = re.sub(r"\s+", "", str(body.get("action") or ""))
         self._require_sales_access(user, resource, action)
         if action == "星支付":
@@ -8084,7 +11567,9 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         row = execute_one(
             connection,
             f"""
-            SELECT cp.coupon_id,cp.store_id,cp.status,ext.audit_status
+            SELECT cp.coupon_id,cp.store_id,cp.status,cp.benefit,
+                   cp.expire_date,cp.order_ref,cp.used_at,
+                   ext.audit_status,ext.starts_at,ext.remaining_amount
             FROM coupons cp
             JOIN sales_coupon_extensions ext ON ext.coupon_id=cp.coupon_id
             WHERE cp.coupon_id=%s AND cp.tenant_id=%s AND {clause}
@@ -8096,16 +11581,30 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             raise ApiError("优惠记录不存在或无权访问", 404, 40400)
         before = row["audit_status"]
         after = before
+        log_detail = {}
         with connection.cursor() as cursor:
             if action == "删除":
+                if Decimal(str(row["remaining_amount"] or 0)) != Decimal(
+                    str(row["benefit"] or 0)
+                ):
+                    raise ApiError("已发生核销的优惠券不能删除")
                 cursor.execute(
                     "UPDATE coupons SET status='已删除' WHERE coupon_id=%s",
                     (coupon_id,),
                 )
                 after = "已删除"
             elif action == "审核":
+                if row["status"] != "未使用":
+                    raise ApiError("只有未使用的优惠券可以审核")
                 result = str(body.get("auditResult") or "审核通过")
-                after = "已通过" if "通过" in result else "审核不通过"
+                after = (
+                    "审核不通过"
+                    if "不通过" in result or "驳回" in result
+                    else "已通过"
+                )
+                audit_remark = self._sales_text(
+                    body, "auditRemark", "审核意见", max_length=500
+                )
                 cursor.execute(
                     """
                     UPDATE sales_coupon_extensions
@@ -8115,12 +11614,14 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     """,
                     (
                         after,
-                        body.get("auditRemark") or None,
+                        audit_remark or None,
                         user["user_id"],
                         coupon_id,
                     ),
                 )
             elif action == "反审核":
+                if row["status"] != "未使用":
+                    raise ApiError("已使用或已停用的优惠券不能反审核")
                 after = "待审核"
                 cursor.execute(
                     """
@@ -8130,7 +11631,78 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     """,
                     (coupon_id,),
                 )
+            elif action == "核销":
+                if row["audit_status"] != "已通过":
+                    raise ApiError("优惠券审核通过后才能核销")
+                if row["status"] not in ("未使用", "部分使用"):
+                    raise ApiError("当前优惠券状态不允许核销")
+                starts_at = self._catalog_date(
+                    row.get("starts_at"), "优惠开始时间"
+                )
+                expire_date = self._catalog_date(
+                    row.get("expire_date"), "优惠结束时间"
+                )
+                if starts_at and starts_at > date.today():
+                    raise ApiError("优惠券尚未到生效日期")
+                if expire_date and expire_date < date.today():
+                    raise ApiError("优惠券已过期")
+                consume_amount = self._sales_decimal(
+                    body, "consumeAmount", positive=True
+                )
+                if consume_amount > Decimal("1000000"):
+                    raise ApiError("本次核销金额不能超过1000000")
+                remaining = Decimal(str(row["remaining_amount"] or 0))
+                if consume_amount > remaining:
+                    raise ApiError("本次核销金额不能超过剩余金额")
+                sale_no = self._sales_text(
+                    body,
+                    "saleNo",
+                    "关联业务单号",
+                    required=True,
+                    max_length=64,
+                )
+                redeem_remark = self._sales_text(
+                    body,
+                    "remark",
+                    "核销说明",
+                    required=True,
+                    max_length=500,
+                )
+                new_remaining = remaining - consume_amount
+                after = "已核销" if new_remaining == 0 else "部分使用"
+                cursor.execute(
+                    """
+                    UPDATE coupons
+                    SET status=%s,used_at=NOW(),order_ref=%s,
+                        version=version+1
+                    WHERE coupon_id=%s
+                    """,
+                    (after, sale_no, coupon_id),
+                )
+                cursor.execute(
+                    """
+                    UPDATE sales_coupon_extensions
+                    SET remaining_amount=%s
+                    WHERE coupon_id=%s
+                    """,
+                    (new_remaining, coupon_id),
+                )
+                log_detail = {
+                    "saleNo": sale_no,
+                    "consumeAmount": str(consume_amount),
+                    "remainingAmount": str(new_remaining),
+                    "remark": redeem_remark,
+                }
             elif action == "停用":
+                if row["status"] in ("已核销", "已删除", "已停用"):
+                    raise ApiError("当前优惠券状态不允许停用")
+                disable_reason = self._sales_text(
+                    body,
+                    "disableReason",
+                    "停用原因",
+                    required=True,
+                    max_length=500,
+                )
                 after = "已停用"
                 cursor.execute(
                     "UPDATE coupons SET status='已停用' WHERE coupon_id=%s",
@@ -8141,8 +11713,9 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     UPDATE sales_coupon_extensions SET disable_reason=%s
                     WHERE coupon_id=%s
                     """,
-                    (body.get("remark") or None, coupon_id),
+                    (disable_reason, coupon_id),
                 )
+                log_detail = {"disableReason": disable_reason}
             else:
                 raise ApiError("当前优惠操作尚未实现", 403, 40300)
         self._sales_log(
@@ -8154,6 +11727,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             action,
             before,
             after,
+            log_detail,
         )
         return {"id": coupon_id, "status": after}
 
@@ -8183,6 +11757,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         if not row:
             raise ApiError("优惠券模板不存在或无权访问", 404, 40400)
         if action == "删除":
+            if int(row["issued_qty"] or 0) > 0:
+                raise ApiError("已有发放记录的优惠券模板不能删除")
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
@@ -8204,6 +11780,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             return {"id": tpl_id, "status": "已删除"}
         if action != "分发":
             raise ApiError("当前优惠券操作尚未实现", 403, 40300)
+        if row["status"] != "启用":
+            raise ApiError("只有启用中的优惠券模板可以分发")
         store_id = int(row["store_id"])
         customer = self._sales_customer(
             connection,
@@ -8219,8 +11797,11 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             quantity = int(body.get("quantity") or 1)
         except (TypeError, ValueError) as exc:
             raise ApiError("发放数量格式不正确") from exc
-        if quantity <= 0:
-            raise ApiError("发放数量必须大于0")
+        if not 1 <= quantity <= 100:
+            raise ApiError("单次发放数量须在1至100之间")
+        remark = self._sales_text(
+            body, "remark", "发放说明", max_length=500
+        )
         ext = execute_one(
             connection,
             """
@@ -8229,6 +11810,14 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             """,
             (tpl_id,),
         )
+        starts_at = self._catalog_date(
+            ext.get("starts_at"), "优惠开始时间"
+        )
+        ends_at = self._catalog_date(ext.get("ends_at"), "优惠结束时间")
+        if starts_at and starts_at > date.today():
+            raise ApiError("优惠券尚未到可发放日期")
+        if ends_at and ends_at < date.today():
+            raise ApiError("优惠券已超过发放截止日期")
         if int(row["issued_qty"] or 0) + quantity > int(
             row["total_qty"] or 0
         ):
@@ -8274,16 +11863,18 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 cursor.execute(
                     """
                     INSERT INTO sales_coupon_extensions(
-                      coupon_id,audit_status,starts_at,remaining_amount,
+                      coupon_id,coupon_name,audit_status,starts_at,
+                      remaining_amount,
                       valid_days,remark,created_by_user_id
-                    ) VALUES (%s,'已通过',%s,%s,%s,%s,%s)
+                    ) VALUES (%s,%s,'已通过',%s,%s,%s,%s,%s)
                     """,
                     (
                         coupon_id,
+                        row["name"],
                         ext.get("starts_at"),
                         row["benefit"],
                         row["valid_days"],
-                        body.get("remark") or None,
+                        remark or None,
                         user["user_id"],
                     ),
                 )
@@ -8411,6 +12002,14 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             if resource == "smart-allocation":
                 payload["customers"] = self._room_bookable_customers(
                     connection, user
+                )
+                # Smart allocation needs the same active, store-scoped package
+                # price rules that are used when a contract is created.  Keep
+                # this separate from room inventory so a store with no package
+                # master data (currently the centre store) can still allocate
+                # rooms by room type.
+                payload["packages"] = self._room_allocation_packages(
+                    connection, user, query
                 )
             payload["stores"] = self._room_store_options(connection, user)
             return self._success(payload)
@@ -8615,6 +12214,77 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             result.append(row)
         return result
 
+    def _room_allocation_packages(
+        self, connection, user: dict, query: dict | None = None
+    ) -> list:
+        """Return active package versions grouped for smart allocation.
+
+        A package version can have several price rules, one for each allowed
+        room type.  The allocation page needs one selectable package per
+        store/day combination plus the complete set of allowed room types.
+        """
+        clause, params = self._store_clause(user, "s")
+        rows = execute_all(
+            connection,
+            f"""
+            SELECT pp.package_code AS basePackageCode,
+                   pp.package_name AS packageName,
+                   s.name AS store,
+                   pr.stay_days AS days,
+                   MIN(pr.reference_amount) AS referencePrice,
+                   GROUP_CONCAT(
+                     DISTINCT rt.name ORDER BY rt.sort_order SEPARATOR '|'
+                   ) AS allowedRoomTypes
+            FROM package_products pp
+            JOIN package_versions pv ON pv.package_id=pp.package_id
+            JOIN package_price_rules pr
+              ON pr.package_version_id=pv.package_version_id
+            JOIN stores s ON s.store_id=pr.store_id
+            JOIN room_types rt ON rt.room_type_id=pr.room_type_id
+            WHERE pp.tenant_id=%s AND pp.deleted_at IS NULL
+              AND pp.status='ACTIVE'
+              AND pv.version_status='ACTIVE'
+              AND pr.status='ACTIVE'
+              AND pv.effective_from<=CURDATE()
+              AND (pv.effective_to IS NULL OR pv.effective_to>=CURDATE())
+              AND pr.effective_from<=CURDATE()
+              AND (pr.effective_to IS NULL OR pr.effective_to>=CURDATE())
+              AND {clause}
+            GROUP BY pp.package_code, pp.package_name, s.name,
+                     pr.stay_days, pp.sort_order
+            ORDER BY s.name, pp.sort_order, pp.package_name, pr.stay_days
+            """,
+            [user["tenant_id"], *params],
+        )
+        requested_store = str((query or {}).get("store") or "").strip()
+        result = []
+        packages_by_no = {}
+        for row in rows:
+            if requested_store and not self._room_store_matches(
+                requested_store, str(row.get("store") or "")
+            ):
+                continue
+            row["days"] = int(row.get("days") or 0)
+            row["packageNo"] = f"{row['basePackageCode']}@{row['days']}"
+            row["allowedRoomTypes"] = [
+                item for item in str(row.get("allowedRoomTypes") or "").split("|")
+                if item
+            ]
+            existing = packages_by_no.get(row["packageNo"])
+            if not existing:
+                packages_by_no[row["packageNo"]] = row
+                result.append(row)
+                continue
+            existing["allowedRoomTypes"] = list(dict.fromkeys(
+                [*existing.get("allowedRoomTypes", []), *row["allowedRoomTypes"]]
+            ))
+            if row.get("referencePrice") is not None and (
+                existing.get("referencePrice") is None
+                or row["referencePrice"] < existing["referencePrice"]
+            ):
+                existing["referencePrice"] = row["referencePrice"]
+        return result
+
     def _room_bookable_customers(self, connection, user: dict) -> list:
         clause, params = self._store_clause(user, "c")
         rows = execute_all(
@@ -8624,7 +12294,10 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                    c.phone AS mobile, c.status, s.name AS store,
                    ct.contract_id AS contractId, ct.contract_no AS contractNo,
                    ct.package_name AS packageName,
-                   ct.amount AS contractAmount, ct.days AS bookableDays,
+                   ct.amount AS contractAmount, ct.paid AS paidAmount,
+                   GREATEST(ct.amount-COALESCE(ct.paid,0),0)
+                     AS outstandingAmount,
+                   ct.days AS bookableDays,
                    ct.expected_check_in AS birthDate,
                    COALESCE(c.intent_room, '') AS reservedRoomType,
                    staff.name AS salesperson
@@ -8635,17 +12308,20 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
              AND ct.status='已审核'
             LEFT JOIN staff ON staff.staff_id=c.sales_staff_id
             WHERE c.tenant_id=%s AND c.deleted_at IS NULL AND {clause}
+              AND COALESCE(ct.paid,0)>0
+              AND NOT EXISTS (
+                SELECT 1 FROM room_bookings rb
+                WHERE rb.contract_id=ct.contract_id
+                  AND rb.deleted_at IS NULL
+                  AND rb.status IN ('已订房','已入住')
+              )
             ORDER BY c.customer_id DESC
             LIMIT 1000
             """,
             [user["tenant_id"], *params],
         )
         for row in rows:
-            row["status"] = (
-                "- 已订房 -"
-                if str(row.get("status") or "") in {"已订房", "已入住"}
-                else "- 未订房 -"
-            )
+            row["status"] = "- 未订房 -"
         return rows
 
     def _room_type_trend_rows(
@@ -9080,8 +12756,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             )
         if not row:
             raise ApiError("客户不存在，请先在客户管理建档")
-        if row["store_id"] not in user["store_ids"] and "SYS_ADMIN" not in user["roles"]:
-            raise ApiError("无权访问该客户所属门店", 403, 40300)
+        self._allowed_store(user, row["store_id"])
         return row
 
     def _room_contract(
@@ -9093,7 +12768,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 connection,
                 """
                 SELECT contract_id, store_id, customer_id, contract_no,
-                       status, expected_check_in, expected_check_out
+                       status, amount, paid,
+                       expected_check_in, expected_check_out
                 FROM contracts
                 WHERE contract_id=%s AND tenant_id=%s AND deleted_at IS NULL
                 """,
@@ -9104,7 +12780,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 connection,
                 """
                 SELECT contract_id, store_id, customer_id, contract_no,
-                       status, expected_check_in, expected_check_out
+                       status, amount, paid,
+                       expected_check_in, expected_check_out
                 FROM contracts
                 WHERE tenant_id=%s AND customer_id=%s
                   AND deleted_at IS NULL AND status='已审核'
@@ -9117,6 +12794,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             raise ApiError("客户没有可用于订房的已审核合同")
         if row["status"] != "已审核":
             raise ApiError("只有已审核合同可以订房")
+        if Decimal(str(row.get("paid") or 0)) <= 0:
+            raise ApiError("至少一笔收款审核入账后才可以订房")
         return row
 
     def _room_by_body(
@@ -9296,6 +12975,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             )
             if not check_in or not check_out or check_in >= check_out:
                 raise ApiError("预住日期必须早于预离开日期")
+            if check_in < date.today().isoformat():
+                raise ApiError("预住日期不能早于今天")
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
@@ -9355,6 +13036,21 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         )[:10]
         if not check_in or not check_out or check_in >= check_out:
             raise ApiError("预住日期必须早于预离开日期")
+        if check_in < date.today().isoformat():
+            raise ApiError("预住日期不能早于今天")
+        contract_conflict = execute_one(
+            connection,
+            """
+            SELECT booking_id FROM room_bookings
+            WHERE contract_id=%s AND deleted_at IS NULL
+              AND status IN ('已订房','已入住')
+              AND NOT (check_out<=%s OR check_in>=%s)
+            LIMIT 1
+            """,
+            (contract["contract_id"], check_in, check_out),
+        )
+        if contract_conflict:
+            raise ApiError("该合同在所选日期已有订房记录")
         conflict = execute_one(
             connection,
             """
@@ -10414,8 +14110,18 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         }
         if resource not in supported:
             raise ApiError("商城资源不存在", 404, 40400)
-        if resource != "products":
-            return self._success({"list": [], "total": 0})
+        scoped_user = self._user_for_selected_store(user, query)
+        overview = mama_box_overview(connection, scoped_user)
+        overview_key = "schedule" if resource == "class-schedule" else resource
+        overview_value = overview.get(overview_key)
+        rows = (
+            overview_value.get("rows", [])
+            if isinstance(overview_value, dict)
+            else overview_value
+        )
+        rows = rows if isinstance(rows, list) else []
+        if rows or resource != "products":
+            return self._success({"list": rows, "total": len(rows), "source": "mysql"})
         rows = execute_all(
             connection,
             """
@@ -10475,44 +14181,341 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             "supplier-prepayments",
             "supplier-payments",
             "accounts-payable-detail",
+            "batch-expiry",
+            "supplier-records",
         }
         if resource not in supported:
             raise ApiError("仓存资源不存在", 404, 40400)
-        if resource != "other-inbounds":
-            return self._success({"list": [], "total": 0})
-        clause, params = self._store_clause(user, "sm")
-        rows = execute_all(
-            connection,
-            f"""
-            SELECT sm.id,
-                   COALESCE(NULLIF(sm.ref,''), CONCAT('IN-', sm.id))
-                     AS inboundNo,
-                   sm.created_at AS inboundDate,
-                   sm.type AS inboundType,
-                   i.item_id AS materialCode, i.name AS materialName,
-                   i.unit, sm.qty AS quantity,
-                   inv.avg_cost AS unitPrice,
-                   sm.qty*COALESCE(inv.avg_cost,0) AS amount,
-                   s.name AS warehouse, sm.created_by AS operator,
-                   sm.created_by AS creator, '' AS auditStatus,
-                   '' AS remark
-            FROM stock_movements sm
-            LEFT JOIN items i ON i.item_id=sm.item_id
-            LEFT JOIN stores s ON s.store_id=sm.store_id
-            LEFT JOIN inventory inv
-              ON inv.tenant_id=sm.tenant_id
-             AND inv.store_id=sm.store_id
-             AND inv.item_id=sm.item_id
-            WHERE sm.tenant_id=%s AND {clause}
-              AND sm.type IN (
-                '盘盈入库','调拨入库','退料入库','其他入库'
-              )
-            ORDER BY sm.id DESC
-            LIMIT 500
-            """,
-            [user["tenant_id"], *params],
+        rows = []
+        inventory_clause, inventory_params = self._scoped_store_clause(
+            user, query, "inv"
         )
-        return self._success({"list": rows, "total": len(rows)})
+        if resource in {
+            "warehouse-stock-query",
+            "stock-summary-report",
+            "opening-stock-query",
+        }:
+            rows = execute_all(
+                connection,
+                f"""
+                SELECT inv.item_id AS id, store.name AS store,
+                       store.name AS warehouse,
+                       item.item_id AS materialCode,
+                       item.name AS materialName, item.cat AS specification,
+                       item.unit, inv.qty AS currentQuantity,
+                       0 AS lockedQuantity, inv.qty AS availableQuantity,
+                       inv.avg_cost AS unitPrice,
+                       inv.qty*inv.avg_cost AS stockAmount,
+                       inv.qty AS closingQuantity,
+                       inv.qty*inv.avg_cost AS closingAmount,
+                       0 AS openingQuantity, 0 AS openingAmount,
+                       0 AS inQuantity, 0 AS inAmount,
+                       0 AS outQuantity, 0 AS outAmount,
+                       MIN(batch.expiry_date) AS expiryDate,
+                       CASE
+                         WHEN inv.qty<0 THEN '负库存'
+                         WHEN inv.qty=0 THEN '零库存'
+                         ELSE '有库存'
+                       END AS stockCondition
+                FROM inventory inv
+                JOIN items item
+                  ON item.item_id=inv.item_id
+                 AND item.tenant_id=inv.tenant_id
+                JOIN stores store ON store.store_id=inv.store_id
+                LEFT JOIN inventory_batches batch
+                  ON batch.tenant_id=inv.tenant_id
+                 AND batch.store_id=inv.store_id
+                 AND batch.item_id=inv.item_id
+                 AND batch.deleted_at IS NULL
+                 AND batch.qty>0
+                WHERE inv.tenant_id=%s AND {inventory_clause}
+                GROUP BY inv.store_id,inv.item_id
+                ORDER BY store.sort_weight DESC,store.store_id,item.name
+                LIMIT 1000
+                """,
+                [user["tenant_id"], *inventory_params],
+            )
+        elif resource == "stock-warnings":
+            rows = execute_all(
+                connection,
+                f"""
+                SELECT inv.item_id AS id,
+                       item.item_id AS materialCode,
+                       item.name AS materialName,
+                       item.cat AS specification,item.unit,
+                       store.name AS store,store.name AS warehouse,
+                       inv.qty AS currentQuantity,
+                       inv.warn_qty AS safetyQuantity,
+                       NULL AS maxQuantity,
+                       MIN(batch.expiry_date) AS expiryDate,
+                       CASE
+                         WHEN MIN(batch.expiry_date)<CURDATE()
+                           THEN '已过期'
+                         WHEN MIN(batch.expiry_date)
+                              <=DATE_ADD(CURDATE(),INTERVAL 30 DAY)
+                           THEN '临期'
+                         WHEN inv.qty=0 THEN '库存为零'
+                         WHEN inv.qty<=inv.warn_qty THEN '低于安全库存'
+                         ELSE '正常'
+                       END AS warningType,
+                       CASE
+                         WHEN inv.qty<=inv.warn_qty
+                           OR MIN(batch.expiry_date)
+                              <=DATE_ADD(CURDATE(),INTERVAL 30 DAY)
+                         THEN '未处理'
+                         ELSE '正常'
+                       END AS warningStatus,
+                       NULL AS lastHandledAt
+                FROM inventory inv
+                JOIN items item
+                  ON item.item_id=inv.item_id
+                 AND item.tenant_id=inv.tenant_id
+                JOIN stores store ON store.store_id=inv.store_id
+                LEFT JOIN inventory_batches batch
+                  ON batch.tenant_id=inv.tenant_id
+                 AND batch.store_id=inv.store_id
+                 AND batch.item_id=inv.item_id
+                 AND batch.deleted_at IS NULL
+                 AND batch.qty>0
+                WHERE inv.tenant_id=%s AND {inventory_clause}
+                GROUP BY inv.store_id,inv.item_id
+                HAVING warningType<>'正常'
+                ORDER BY expiryDate, currentQuantity
+                LIMIT 1000
+                """,
+                [user["tenant_id"], *inventory_params],
+            )
+        elif resource == "batch-expiry":
+            batch_clause, batch_params = self._scoped_store_clause(
+                user, query, "batch"
+            )
+            rows = execute_all(
+                connection,
+                f"""
+                SELECT batch.batch_id AS id,
+                       batch.batch_no AS batchNo,
+                       item.item_id AS materialCode,
+                       item.name AS materialName,item.unit,
+                       store.name AS store,store.name AS warehouse,
+                       batch.qty AS currentQuantity,
+                       batch.production_date AS productionDate,
+                       batch.expiry_date AS expiryDate,
+                       batch.ref AS sourceDocument,
+                       CASE
+                         WHEN batch.expiry_date<CURDATE() THEN '已过期'
+                         WHEN batch.expiry_date
+                              <=DATE_ADD(CURDATE(),INTERVAL 30 DAY)
+                           THEN '临期'
+                         ELSE '有效'
+                       END AS expiryStatus
+                FROM inventory_batches batch
+                JOIN items item
+                  ON item.item_id=batch.item_id
+                 AND item.tenant_id=batch.tenant_id
+                JOIN stores store ON store.store_id=batch.store_id
+                WHERE batch.tenant_id=%s
+                  AND batch.deleted_at IS NULL
+                  AND {batch_clause}
+                ORDER BY batch.expiry_date,batch.batch_id
+                LIMIT 1000
+                """,
+                [user["tenant_id"], *batch_params],
+            )
+        elif resource in {
+            "purchase-orders",
+            "purchase-order-audits",
+            "purchase-detail-report",
+        }:
+            purchase_clause, purchase_params = self._scoped_store_clause(
+                user, query, "purchase"
+            )
+            rows = execute_all(
+                connection,
+                f"""
+                SELECT purchase.po_id AS id,
+                       purchase.po_no AS purchaseNo,
+                       LEFT(purchase.created_at,10) AS purchaseDate,
+                       purchase.supplier,store.name AS store,
+                       store.name AS warehouse,
+                       item.item_id AS materialCode,
+                       item.name AS materialName,item.cat AS specification,
+                       item.unit,line.qty AS quantity,
+                       line.qty AS purchaseQuantity,
+                       line.unit_cost AS unitPrice,
+                       line.qty*line.unit_cost AS amount,
+                       line.qty AS receivedQuantity,
+                       CASE WHEN purchase.status IN ('已入库','已完成')
+                         THEN line.qty ELSE 0 END AS inboundQuantity,
+                       purchase.total_cost AS totalAmount,
+                       purchase.created_by AS buyer,
+                       purchase.status AS auditStatus,
+                       purchase.status AS arrivalStatus,
+                       purchase.note AS remark
+                FROM purchase_orders purchase
+                LEFT JOIN purchase_lines line
+                  ON line.po_id=purchase.po_id
+                 AND line.tenant_id=purchase.tenant_id
+                LEFT JOIN items item ON item.item_id=line.item_id
+                JOIN stores store ON store.store_id=purchase.store_id
+                WHERE purchase.tenant_id=%s
+                  AND purchase.deleted_at IS NULL
+                  AND {purchase_clause}
+                ORDER BY purchase.po_id DESC,line.line_id
+                LIMIT 1000
+                """,
+                [user["tenant_id"], *purchase_params],
+            )
+        elif resource == "stock-transfers":
+            allowed = [
+                int(value)
+                for value in user.get("store_ids") or []
+                if str(value).isdigit()
+            ]
+            if allowed:
+                placeholders = ",".join(["%s"] * len(allowed))
+                params = [
+                    user["tenant_id"],
+                    *allowed,
+                    *allowed,
+                ]
+                requested = self._requested_store_id(user, query)
+                requested_sql = ""
+                if requested is not None:
+                    requested_sql = (
+                        " AND (transfer.from_store=%s"
+                        " OR transfer.to_store=%s)"
+                    )
+                    params.extend([requested, requested])
+                rows = execute_all(
+                    connection,
+                    f"""
+                    SELECT transfer.transfer_id AS id,
+                           transfer.transfer_no AS transferNo,
+                           LEFT(transfer.created_at,10) AS transferDate,
+                           source.name AS sourceWarehouse,
+                           target.name AS targetWarehouse,
+                           item.item_id AS materialCode,
+                           item.name AS materialName,
+                           item.cat AS specification,item.unit,
+                           transfer.qty AS quantity,
+                           transfer.status AS transferStatus,
+                           transfer.status AS auditStatus,
+                           transfer.created_by AS operator,
+                           transfer.note AS remark
+                    FROM stock_transfers transfer
+                    JOIN stores source
+                      ON source.store_id=transfer.from_store
+                    JOIN stores target
+                      ON target.store_id=transfer.to_store
+                    JOIN items item ON item.item_id=transfer.item_id
+                    WHERE transfer.tenant_id=%s
+                      AND transfer.deleted_at IS NULL
+                      AND transfer.from_store IN ({placeholders})
+                      AND transfer.to_store IN ({placeholders})
+                      {requested_sql}
+                    ORDER BY transfer.transfer_id DESC
+                    LIMIT 1000
+                    """,
+                    params,
+                )
+        elif resource == "stocktakes":
+            stocktake_clause, stocktake_params = (
+                self._scoped_store_clause(user, query, "stocktake")
+            )
+            rows = execute_all(
+                connection,
+                f"""
+                SELECT stocktake.stocktake_id AS id,
+                       stocktake.stocktake_no AS stocktakeNo,
+                       LEFT(stocktake.created_at,10) AS stocktakeDate,
+                       store.name AS store,store.name AS warehouse,
+                       item.item_id AS materialCode,
+                       item.name AS materialName,item.unit,
+                       line.book_qty AS bookQuantity,
+                       line.counted_qty AS actualQuantity,
+                       line.variance AS differenceQuantity,
+                       line.variance*inventory.avg_cost AS differenceAmount,
+                       stocktake.status AS stocktakeStatus,
+                       stocktake.created_by AS stocktaker,
+                       stocktake.status AS auditStatus,
+                       stocktake.note AS remark
+                FROM stocktakes stocktake
+                JOIN stores store ON store.store_id=stocktake.store_id
+                LEFT JOIN stocktake_lines line
+                  ON line.stocktake_id=stocktake.stocktake_id
+                 AND line.tenant_id=stocktake.tenant_id
+                LEFT JOIN items item ON item.item_id=line.item_id
+                LEFT JOIN inventory
+                  ON inventory.tenant_id=stocktake.tenant_id
+                 AND inventory.store_id=stocktake.store_id
+                 AND inventory.item_id=line.item_id
+                WHERE stocktake.tenant_id=%s
+                  AND stocktake.deleted_at IS NULL
+                  AND {stocktake_clause}
+                ORDER BY stocktake.stocktake_id DESC,line.line_id
+                LIMIT 1000
+                """,
+                [user["tenant_id"], *stocktake_params],
+            )
+        elif resource in {"stock-ledger-report", "other-inbounds"}:
+            movement_clause, movement_params = (
+                self._scoped_store_clause(user, query, "movement")
+            )
+            inbound_filter = (
+                "AND movement.type IN "
+                "('盘盈入库','调拨入库','退料入库','其他入库')"
+                if resource == "other-inbounds"
+                else ""
+            )
+            rows = execute_all(
+                connection,
+                f"""
+                SELECT movement.id,
+                       COALESCE(NULLIF(movement.ref,''),
+                         CONCAT('MOVE-',movement.id)) AS documentNo,
+                       COALESCE(NULLIF(movement.ref,''),
+                         CONCAT('IN-',movement.id)) AS inboundNo,
+                       LEFT(movement.created_at,10) AS businessDate,
+                       LEFT(movement.created_at,10) AS inboundDate,
+                       movement.type AS businessType,
+                       movement.type AS inboundType,
+                       store.name AS store,store.name AS warehouse,
+                       item.item_id AS materialCode,
+                       item.name AS materialName,item.unit,
+                       CASE WHEN movement.qty>0
+                         THEN movement.qty ELSE 0 END AS inQuantity,
+                       CASE WHEN movement.qty<0
+                         THEN -movement.qty ELSE 0 END AS outQuantity,
+                       movement.qty AS quantity,
+                       inventory.qty AS balanceQuantity,
+                       inventory.avg_cost AS unitPrice,
+                       inventory.qty*inventory.avg_cost AS balanceAmount,
+                       movement.created_by AS operator,
+                       movement.created_by AS creator
+                FROM stock_movements movement
+                LEFT JOIN items item ON item.item_id=movement.item_id
+                LEFT JOIN stores store ON store.store_id=movement.store_id
+                LEFT JOIN inventory
+                  ON inventory.tenant_id=movement.tenant_id
+                 AND inventory.store_id=movement.store_id
+                 AND inventory.item_id=movement.item_id
+                WHERE movement.tenant_id=%s
+                  AND {movement_clause}
+                  {inbound_filter}
+                ORDER BY movement.id DESC
+                LIMIT 1000
+                """,
+                [user["tenant_id"], *movement_params],
+            )
+        data = self._merge_operational_module_rows(
+            connection,
+            user,
+            "INVENTORY",
+            resource,
+            query,
+            {"list": rows, "total": len(rows), "source": "mysql"},
+        )
+        return self._success(data)
 
     def _audit(
         self,
@@ -10548,7 +14551,431 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 ),
             )
 
+    def _require_foundation_write(self, user: dict):
+        self._require_any_permission(user, ("SYSTEM.EDIT", "BASIC.EDIT"))
+
+    def _foundation_store_id(self, connection, user: dict, payload: dict) -> int:
+        requested_id = payload.get("storeId") or payload.get("store_id")
+        if requested_id:
+            return self._allowed_store(user, requested_id)
+        requested_name = str(payload.get("store") or "").strip()
+        if not requested_name:
+            raise ApiError("请选择所属门店")
+        clause, params = self._store_clause(user, "s")
+        row = execute_one(
+            connection,
+            f"""
+            SELECT s.store_id AS id FROM stores s
+            WHERE s.tenant_id=%s AND s.name=%s AND {clause}
+            LIMIT 1
+            """,
+            [user["tenant_id"], requested_name, *params],
+        )
+        if not row:
+            raise ApiError("当前账号无权访问所选门店", 403, 40300)
+        return int(row["id"])
+
+    def _foundation_manager_id(
+        self, connection, user: dict, store_id: int, manager: object
+    ) -> int | None:
+        name = str(manager or "").strip()
+        if not name:
+            return None
+        row = execute_one(
+            connection,
+            """
+            SELECT staff_id AS id FROM staff
+            WHERE tenant_id=%s AND store_id=%s AND name=%s
+              AND employment_status='ACTIVE'
+            LIMIT 1
+            """,
+            (user["tenant_id"], store_id, name),
+        )
+        if not row:
+            raise ApiError("负责人须为所选门店的在职职员")
+        return int(row["id"])
+
+    def _foundation_status(self, value: object) -> str:
+        if str(value or "启用") in {"启用", "ACTIVE", "正常"}:
+            return "ACTIVE"
+        return "ACTIVE" if str(value or "启用") in {"启用", "ACTIVE", "正常"} else "INACTIVE"
+
+    def _foundation_code(self, value: object, label: str) -> str:
+        code = str(value or "").strip().upper()
+        if not re.fullmatch(r"[A-Z0-9_]{2,64}", code):
+            raise ApiError(f"{label}仅可使用 2-64 位大写字母、数字或下划线")
+        return code
+
+    def _post_foundation_resource(
+        self, connection, user: dict, resource: str, body: dict
+    ):
+        if resource == "/roles/save":
+            return self._save_foundation_role(connection, user, body)
+        if resource == "/departments/save":
+            return self._save_foundation_department(connection, user, body)
+        if resource == "/stores/save":
+            return self._save_foundation_store(connection, user, body)
+        if resource == "/users/save":
+            return self._save_foundation_user(connection, user, body)
+        match = re.fullmatch(r"/roles/(\d+)/permissions", resource)
+        if match:
+            return self._save_foundation_role_permissions(
+                connection, user, int(match.group(1)), body
+            )
+        raise ApiError("基础平台写入资源不存在", 404, 40400)
+
+    def _save_foundation_user(self, connection, user: dict, body: dict):
+        """Create or edit a login account linked to an existing employee."""
+        self._require_foundation_write(user)
+        account_id = int(body.get("id") or 0)
+        username = str(body.get("username") or "").strip()
+        staff_name = str(body.get("name") or "").strip()
+        initial_password = str(body.get("initialPassword") or "")
+        role_id = int(body.get("roleId") or 0)
+        store_id = self._foundation_store_id(connection, user, body)
+        self._require_selected_write_store(user, body, store_id)
+
+        if not re.fullmatch(r"[A-Za-z0-9_.@\-\u4e00-\u9fff]{2,64}", username):
+            raise ApiError("登录账号须为2-64位中文、字母、数字或 _ . @ -")
+        if not staff_name or len(staff_name) > 64:
+            raise ApiError("员工姓名不能为空且不超过64字符")
+        if not account_id and not (6 <= len(initial_password) <= 64):
+            raise ApiError("新建账号的初始密码须为6-64位")
+        if account_id and initial_password:
+            raise ApiError("编辑账号时不能修改初始密码，请使用独立的密码重置流程")
+
+        role = execute_one(
+            connection,
+            """SELECT role_id, name FROM roles
+               WHERE tenant_id=%s AND role_id=%s AND status='ACTIVE'""",
+            (user["tenant_id"], role_id),
+        )
+        if not role:
+            raise ApiError("请选择当前租户内启用的角色")
+
+        staff_rows = execute_all(
+            connection,
+            """SELECT staff_id, name FROM staff
+               WHERE tenant_id=%s AND store_id=%s AND name=%s
+                 AND employment_status='ACTIVE'
+               ORDER BY staff_id LIMIT 2""",
+            (user["tenant_id"], store_id, staff_name),
+        )
+        if not staff_rows:
+            raise ApiError("未找到该门店的在职员工，请先在员工档案中建立员工")
+        if len(staff_rows) > 1:
+            raise ApiError("该门店存在同名员工，请先在员工档案中补充唯一员工编号")
+        staff_id = int(staff_rows[0]["staff_id"])
+
+        previous = None
+        if account_id:
+            previous = execute_one(
+                connection,
+                """SELECT user_id, staff_id, username, default_store_id, status
+                   FROM user_accounts
+                   WHERE tenant_id=%s AND user_id=%s""",
+                (user["tenant_id"], account_id),
+            )
+            if not previous:
+                raise ApiError("员工账号不存在", 404, 40400)
+            self._allowed_store(user, previous.get("default_store_id"))
+
+        duplicate_username = execute_one(
+            connection,
+            """SELECT user_id FROM user_accounts
+               WHERE tenant_id=%s AND username=%s AND user_id<>%s LIMIT 1""",
+            (user["tenant_id"], username, account_id),
+        )
+        if duplicate_username:
+            raise ApiError("登录账号已存在")
+        duplicate_staff = execute_one(
+            connection,
+            """SELECT user_id FROM user_accounts
+               WHERE tenant_id=%s AND staff_id=%s AND user_id<>%s LIMIT 1""",
+            (user["tenant_id"], staff_id, account_id),
+        )
+        if duplicate_staff:
+            raise ApiError("该员工已经绑定登录账号")
+
+        current_role = execute_one(
+            connection,
+            """SELECT role_id FROM user_roles
+               WHERE user_id=%s AND effective_from<=NOW()
+                 AND (effective_to IS NULL OR effective_to>NOW())
+               ORDER BY effective_from DESC LIMIT 1""",
+            (account_id,),
+        ) if account_id else None
+
+        status = self._foundation_status(body.get("status"))
+        with connection.cursor() as cursor:
+            if account_id:
+                cursor.execute(
+                    """UPDATE user_accounts
+                       SET staff_id=%s, username=%s, default_store_id=%s,
+                           status=%s
+                       WHERE tenant_id=%s AND user_id=%s""",
+                    (staff_id, username, store_id, status, user["tenant_id"], account_id),
+                )
+            else:
+                cursor.execute(
+                    """INSERT INTO user_accounts
+                       (tenant_id, staff_id, username, password_hash,
+                        default_store_id, status, password_changed_at)
+                       VALUES(%s,%s,%s,%s,%s,%s,NOW())""",
+                    (
+                        user["tenant_id"], staff_id, username,
+                        hash_password(initial_password), store_id, status,
+                    ),
+                )
+                account_id = int(cursor.lastrowid)
+
+            if not current_role or int(current_role["role_id"]) != role_id:
+                # Expire rather than delete assignments so history remains auditable.
+                cursor.execute(
+                    """UPDATE user_roles SET effective_to=NOW()
+                       WHERE user_id=%s AND effective_from<=NOW()
+                         AND (effective_to IS NULL OR effective_to>NOW())""",
+                    (account_id,),
+                )
+                cursor.execute(
+                    """INSERT INTO user_roles
+                       (user_id, role_id, effective_from, assigned_by)
+                       VALUES(%s,%s,NOW(),%s)""",
+                    (account_id, role_id, user["user_id"]),
+                )
+            # Preserve existing cross-store grants and ensure the new default store.
+            cursor.execute(
+                """INSERT INTO user_stores(user_id, store_id, access_level)
+                   VALUES(%s,%s,'MANAGE')
+                   ON DUPLICATE KEY UPDATE access_level='MANAGE'""",
+                (account_id, store_id),
+            )
+
+        self._audit(
+            connection, user, "user_account", account_id,
+            "EDIT" if previous else "CREATE", store_id,
+            previous.get("status") if previous else None, status,
+            {"username": username, "staffId": staff_id, "roleId": role_id},
+        )
+        connection.commit()
+        return self._success({"id": account_id, "saved": True})
+
+    def _save_foundation_store(self, connection, user: dict, body: dict):
+        self._require_foundation_write(user)
+        store_id = int(body.get("id") or 0)
+        name = str(body.get("name") or "").strip()
+        manager = str(body.get("manager") or "").strip()
+        if not name or len(name) > 128 or len(manager) > 64:
+            raise ApiError("门店名称不能为空且不超过128字符，负责人不超过64字符")
+        if not store_id:
+            # New locations are a headquarters-only operation.  They start
+            # inactive so that a new master record cannot accidentally accept
+            # customers before staff, rooms and package data are configured.
+            if "SYS_ADMIN" not in user.get("roles", []):
+                raise ApiError("仅系统管理员可新增门店", 403, 40300)
+            selected = str(body.get("selectedStoreId") or "").strip().lower()
+            if selected and selected != "all":
+                raise ApiError("新增门店请在全部门店视图办理", 400, 40000)
+            duplicate = execute_one(
+                connection,
+                "SELECT store_id FROM stores WHERE tenant_id=%s AND name=%s LIMIT 1",
+                (user["tenant_id"], name),
+            )
+            if duplicate:
+                raise ApiError("已存在同名门店，请直接编辑该门店档案")
+            next_row = execute_one(
+                connection,
+                "SELECT COALESCE(MAX(store_id), 0) + 1 AS next_id FROM stores",
+            )
+            store_id = int(next_row["next_id"])
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO stores
+                       (store_id, tenant_id, name, manager, status, sort_weight)
+                       VALUES (%s,%s,%s,%s,%s,%s)""",
+                    (store_id, user["tenant_id"], name, manager or None, "INACTIVE", 0),
+                )
+            self._audit(
+                connection, user, "store", store_id, "CREATE", store_id,
+                None, "INACTIVE", {"name": name, "remark": body.get("remark") or ""},
+            )
+            connection.commit()
+            return self._success({"id": store_id, "saved": True, "status": "INACTIVE"})
+        self._allowed_store(user, store_id)
+        self._require_selected_write_store(user, body, store_id)
+        existing = execute_one(
+            connection,
+            "SELECT status FROM stores WHERE tenant_id=%s AND store_id=%s",
+            (user["tenant_id"], store_id),
+        )
+        if not existing:
+            raise ApiError("门店不存在或无权访问", 404, 40400)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """UPDATE stores SET name=%s, manager=%s, status=%s
+                   WHERE tenant_id=%s AND store_id=%s""",
+                (name, manager or None, self._foundation_status(body.get("status")), user["tenant_id"], store_id),
+            )
+        self._audit(connection, user, "store", store_id, "EDIT", store_id, existing.get("status"), self._foundation_status(body.get("status")), {"name": name})
+        connection.commit()
+        return self._success({"id": store_id, "saved": True})
+
+    def _save_foundation_department(self, connection, user: dict, body: dict):
+        self._require_foundation_write(user)
+        department_id = int(body.get("id") or 0)
+        name = str(body.get("name") or "").strip()
+        if not name or len(name) > 128:
+            raise ApiError("部门名称不能为空且不超过128字符")
+        code = self._foundation_code(body.get("code"), "部门编码")
+        store_id = self._foundation_store_id(connection, user, body)
+        self._require_selected_write_store(user, body, store_id)
+        manager_id = self._foundation_manager_id(connection, user, store_id, body.get("manager"))
+        status = self._foundation_status(body.get("status"))
+        if department_id:
+            clause, params = self._store_clause(user, "d")
+            previous = execute_one(
+                connection,
+                f"SELECT status, store_id FROM departments d WHERE d.department_id=%s AND d.tenant_id=%s AND {clause}",
+                [department_id, user["tenant_id"], *params],
+            )
+            if not previous:
+                raise ApiError("部门不存在或无权访问", 404, 40400)
+        else:
+            previous = None
+        duplicate = execute_one(
+            connection,
+            """SELECT department_id AS id FROM departments
+               WHERE tenant_id=%s AND store_id=%s AND code=%s
+                 AND department_id<>%s LIMIT 1""",
+            (user["tenant_id"], store_id, code, department_id),
+        )
+        if duplicate:
+            raise ApiError("该门店已存在相同部门编码")
+        with connection.cursor() as cursor:
+            if department_id:
+                cursor.execute(
+                    """UPDATE departments SET store_id=%s, code=%s, name=%s,
+                           manager_staff_id=%s, status=%s
+                       WHERE department_id=%s AND tenant_id=%s""",
+                    (store_id, code, name, manager_id, status, department_id, user["tenant_id"]),
+                )
+            else:
+                cursor.execute(
+                    """INSERT INTO departments(tenant_id, store_id, code, name,
+                           manager_staff_id, status)
+                       VALUES(%s,%s,%s,%s,%s,%s)""",
+                    (user["tenant_id"], store_id, code, name, manager_id, status),
+                )
+                department_id = cursor.lastrowid
+        self._audit(connection, user, "department", department_id, "EDIT" if previous else "CREATE", store_id, previous.get("status") if previous else None, status, {"code": code, "name": name})
+        connection.commit()
+        return self._success({"id": department_id, "saved": True})
+
+    def _save_foundation_role(self, connection, user: dict, body: dict):
+        self._require_foundation_write(user)
+        self._require_selected_write_store(user, body)
+        role_id = int(body.get("id") or 0)
+        name = str(body.get("name") or "").strip()
+        if not name or len(name) > 128:
+            raise ApiError("角色名称不能为空且不超过128字符")
+        code = self._foundation_code(body.get("code"), "角色编码")
+        scope_map = {"全部数据": 1, "本门店": 2, "本部门": 3, "本人数据": 4}
+        data_scope = scope_map.get(body.get("dataScope"))
+        if not data_scope:
+            raise ApiError("请选择有效的数据范围")
+        status = self._foundation_status(body.get("status"))
+        previous = execute_one(
+            connection,
+            "SELECT status FROM roles WHERE role_id=%s AND tenant_id=%s",
+            (role_id, user["tenant_id"]),
+        ) if role_id else None
+        if role_id and not previous:
+            raise ApiError("角色不存在", 404, 40400)
+        duplicate = execute_one(
+            connection,
+            "SELECT role_id AS id FROM roles WHERE tenant_id=%s AND code=%s AND role_id<>%s LIMIT 1",
+            (user["tenant_id"], code, role_id),
+        )
+        if duplicate:
+            raise ApiError("角色编码已存在")
+        with connection.cursor() as cursor:
+            if role_id:
+                cursor.execute(
+                    """UPDATE roles SET name=%s, code=%s, data_scope=%s,
+                           description=%s, status=%s
+                       WHERE role_id=%s AND tenant_id=%s""",
+                    (name, code, data_scope, body.get("remark") or None, status, role_id, user["tenant_id"]),
+                )
+            else:
+                cursor.execute(
+                    """INSERT INTO roles(tenant_id, code, name, role_type,
+                           data_scope, description, status, created_at)
+                       VALUES(%s,%s,%s,'JOB',%s,%s,%s,NOW())""",
+                    (user["tenant_id"], code, name, data_scope, body.get("remark") or None, status),
+                )
+                role_id = cursor.lastrowid
+        self._audit(connection, user, "role", role_id, "EDIT" if previous else "CREATE", None, previous.get("status") if previous else None, status, {"code": code, "name": name})
+        connection.commit()
+        return self._success({"id": role_id, "saved": True})
+
+    def _save_foundation_role_permissions(
+        self, connection, user: dict, role_id: int, body: dict
+    ):
+        self._require_foundation_write(user)
+        self._require_selected_write_store(user, body)
+        role = execute_one(
+            connection,
+            "SELECT role_id, status FROM roles WHERE role_id=%s AND tenant_id=%s",
+            (role_id, user["tenant_id"]),
+        )
+        if not role:
+            raise ApiError("角色不存在", 404, 40400)
+        scope_map = {"全部数据": 1, "本门店": 2, "本部门": 3, "本人数据": 4}
+        data_scope = scope_map.get(body.get("dataScope"))
+        if not data_scope:
+            raise ApiError("请选择有效的数据范围")
+        requested = {
+            (str(item.get("module") or ""), str(item.get("action") or ""))
+            for item in body.get("permissions", [])
+            if isinstance(item, dict)
+        }
+        action_sql = """CASE
+            WHEN action_code IN ('VIEW','QUERY') THEN 'view'
+            WHEN action_code IN ('CREATE','ADD') THEN 'create'
+            WHEN action_code IN ('EDIT','UPDATE') THEN 'edit'
+            WHEN action_code IN ('APPROVE','AUDIT') THEN 'approve'
+            WHEN action_code='EXPORT' THEN 'export' END"""
+        rows = execute_all(
+            connection,
+            f"""SELECT permission_id, module_code AS module,
+                       {action_sql} AS action
+                FROM permissions WHERE status='ACTIVE'""",
+        )
+        permitted_ids = [row["permission_id"] for row in rows if (row["module"], row["action"]) in requested]
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM role_permissions WHERE role_id=%s AND effect='ALLOW'", (role_id,))
+            for permission_id in permitted_ids:
+                cursor.execute(
+                    """INSERT INTO role_permissions(role_id, permission_id, effect)
+                       VALUES(%s,%s,'ALLOW')
+                       ON DUPLICATE KEY UPDATE effect='ALLOW'""",
+                    (role_id, permission_id),
+                )
+            cursor.execute("UPDATE roles SET data_scope=%s WHERE role_id=%s", (data_scope, role_id))
+        self._audit(connection, user, "role", role_id, "PERMISSION_EDIT", None, role.get("status"), role.get("status"), {"allowCount": len(permitted_ids), "dataScope": data_scope})
+        connection.commit()
+        return self._success({"id": role_id, "saved": True, "allowCount": len(permitted_ids)})
+
     def _get_resource(self, connection, user: dict, resource: str, query: dict):
+        # An explicit store selection must be inside the signed-in account's
+        # store scope.  Previously the generic MVP resources silently ignored
+        # an unauthorized storeId and returned the account's normal rows,
+        # which made the UI look as if the forbidden store had been selected.
+        # Keep an omitted/all selector as the authorised aggregate scope, but
+        # narrow every concrete selector before any resource query is built.
+        selected_store = str((query or {}).get("storeId") or "").strip()
+        if selected_store and selected_store.lower() != "all":
+            user = self._user_for_selected_store(user, query)
         clause, values = self._store_clause(user)
         if resource == "/options":
             stores = execute_all(
@@ -10570,6 +14997,58 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 """,
                 [user["tenant_id"], *values],
             )
+            package_clause, package_values = self._store_clause(user, "pr")
+            packages = execute_all(
+                connection,
+                f"""
+                SELECT pp.package_id AS id,
+                       pv.package_version_id AS packageVersionId,
+                       pr.price_rule_id AS packagePriceRuleId,
+                       pp.package_name AS packageName,
+                       pr.stay_days AS days,
+                       COALESCE(profile.original_amount, pr.reference_amount)
+                         AS referencePrice,
+                       COALESCE(profile.activity_amount, pr.reference_amount)
+                         AS activityPrice,
+                       COALESCE(profile.deal_amount, pr.reference_amount)
+                         AS salePrice,
+                       rt.room_type_id AS roomTypeId,
+                       rt.name AS roomType,
+                       pr.store_id AS storeId
+                FROM package_products pp
+                JOIN package_versions pv
+                  ON pv.package_id=pp.package_id
+                JOIN package_price_rules pr
+                  ON pr.package_version_id=pv.package_version_id
+                JOIN room_types rt ON rt.room_type_id=pr.room_type_id
+                LEFT JOIN package_price_profiles profile
+                  ON profile.price_rule_id=pr.price_rule_id
+                WHERE pp.tenant_id=%s AND pp.deleted_at IS NULL
+                  AND pp.status='ACTIVE' AND pv.version_status='ACTIVE'
+                  AND pr.status='ACTIVE'
+                  AND pv.effective_from<=CURDATE()
+                  AND (pv.effective_to IS NULL OR pv.effective_to>=CURDATE())
+                  AND pr.effective_from<=CURDATE()
+                  AND (pr.effective_to IS NULL OR pr.effective_to>=CURDATE())
+                  AND {package_clause}
+                ORDER BY pr.store_id, pp.sort_order, rt.sort_order,
+                         pr.stay_days, pp.package_id
+                """,
+                [user["tenant_id"], *package_values],
+            )
+            # A legacy import may contain duplicate price-rule rows for the
+            # same package, room type and stay length.  The signing UI must
+            # expose one unambiguous choice, while retaining the first active
+            # rule for subsequent contract creation.
+            unique_packages = {}
+            for package in packages:
+                package_key = (
+                    package["storeId"], package["packageName"],
+                    package["roomTypeId"], package["days"],
+                    str(package["salePrice"]),
+                )
+                unique_packages.setdefault(package_key, package)
+            packages = list(unique_packages.values())
             booking_contracts = []
             if self._has_permission(user, "ROOM.CREATE"):
                 booking_contracts = execute_all(
@@ -10577,12 +15056,26 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     f"""
                     SELECT ct.contract_id AS id, ct.contract_no,
                            ct.customer_id, c.name AS customer_name,
-                           ct.store_id, ct.status
+                           ct.store_id, ct.status, ct.amount, ct.paid,
+                           ct.package_name,
+                           ext.room_type AS room_type,
+                           GREATEST(ct.amount-COALESCE(ct.paid,0),0)
+                             AS outstanding_amount,
+                           ct.expected_check_in, ct.expected_check_out
                     FROM contracts ct
                     JOIN customers c ON c.customer_id=ct.customer_id
+                    LEFT JOIN sales_contract_extensions ext
+                      ON ext.contract_id=ct.contract_id
                     WHERE ct.tenant_id=%s AND ct.deleted_at IS NULL
                       AND ct.status='已审核'
+                      AND COALESCE(ct.paid,0)>0
                       AND {self._store_clause(user, 'ct')[0]}
+                      AND NOT EXISTS (
+                        SELECT 1 FROM room_bookings rb
+                        WHERE rb.contract_id=ct.contract_id
+                          AND rb.deleted_at IS NULL
+                          AND rb.status IN ('已订房','已入住')
+                      )
                     ORDER BY ct.contract_id DESC
                     LIMIT 200
                     """,
@@ -10598,6 +15091,7 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                     "contractTypes": CONTRACT_TYPES,
                     "receiptTypes": RECEIPT_TYPES,
                     "paymentMethods": PAYMENT_METHODS,
+                    "packages": packages,
                     "permissions": user["permissions"],
                     "roles": user["roles"],
                     "bookingContracts": booking_contracts,
@@ -10725,6 +15219,9 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
     def _get_recovery_resource(
         self, connection, user: dict, resource: str, query: dict
     ):
+        selected_store = str((query or {}).get("storeId") or "").strip()
+        if selected_store and selected_store.lower() != "all":
+            user = self._user_for_selected_store(user, query)
         if resource == "/options":
             self._require_any_permission(user, ("RECOVERY.VIEW",))
             store_clause, store_params = self._store_clause(user, "s")
@@ -10787,6 +15284,17 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             raise ApiError("产康资源不存在", 404, 40400)
         module = match.group(1)
         self._require_recovery_access(user, module)
+        if module in FORMAL_RECOVERY_RESOURCES:
+            rows = self._operational_module_rows(
+                connection,
+                user,
+                "RECOVERY",
+                module,
+                query,
+            )
+            return self._success(
+                {"list": rows, "total": len(rows), "source": "mysql"}
+            )
         rows = self._recovery_rows(connection, user, module)
         rows = self._filter_recovery_rows(rows, query)
         return self._success({"list": rows, "total": len(rows)})
@@ -11215,6 +15723,15 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         module, operation = match.groups()
         if module not in RECOVERY_RESOURCE_NAV_IDS:
             raise ApiError("产康资源不存在", 404, 40400)
+        if module in FORMAL_RECOVERY_RESOURCES:
+            return self._post_operational_module_record(
+                connection,
+                user,
+                "RECOVERY",
+                module,
+                operation,
+                body,
+            )
         if operation == "save":
             return self._save_recovery_record(connection, user, module, body)
         return self._perform_recovery_action(connection, user, module, body)
@@ -11285,7 +15802,15 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         ).strip()
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", appointment_date):
             raise ApiError("请选择预约日期")
+        if appointment_date < date.today().isoformat():
+            raise ApiError("预约日期不能早于今天")
         start, end = self._appointment_period(body)
+        if not start or not end:
+            raise ApiError("预约时段格式应为 HH:mm-HH:mm")
+        start = datetime.strptime(start, "%H:%M").strftime("%H:%M")
+        end = datetime.strptime(end, "%H:%M").strftime("%H:%M")
+        if start >= end:
+            raise ApiError("预约结束时间必须晚于开始时间")
         try:
             service_count = Decimal(str(body.get("serviceCount") or 1))
         except ArithmeticError as exc:
@@ -11322,6 +15847,29 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             if service_count > available:
                 raise ApiError("预约次数不能超过可用剩余次数")
             service_name = entitlement["service_name"]
+
+        conflict = execute_one(
+            connection,
+            """
+            SELECT appointment_id
+            FROM recovery_appointments
+            WHERE tenant_id=%s AND store_id=%s
+              AND technician_staff_id=%s AND appointment_date=%s
+              AND deleted_at IS NULL AND status<>'已取消'
+              AND NOT (period_end<=%s OR period_start>=%s)
+            LIMIT 1
+            """,
+            (
+                user["tenant_id"],
+                store_id,
+                staff["staff_id"],
+                appointment_date,
+                start,
+                end,
+            ),
+        )
+        if conflict:
+            raise ApiError("该服务人员在所选时段已有预约")
 
         with connection.cursor() as cursor:
             cursor.execute(
@@ -12190,7 +16738,9 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         phone = str(body.get("phone", "")).strip()
         if not name:
             raise ApiError("客户姓名不能为空")
-        if not re.fullmatch(r"1\d{10}", phone):
+        if len(name) > 30:
+            raise ApiError("客户姓名不能超过30个字符")
+        if not re.fullmatch(r"1[3-9]\d{9}", phone):
             raise ApiError("手机号格式不正确")
         store_id = self._allowed_store(user, body.get("storeId"))
         duplicate = execute_one(
@@ -12213,12 +16763,12 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
                 connection,
                 """
                 SELECT staff_id FROM staff
-                WHERE staff_id=%s AND tenant_id=%s
+                WHERE staff_id=%s AND tenant_id=%s AND store_id=%s
                 """,
-                (sales_staff_id, user["tenant_id"]),
+                (sales_staff_id, user["tenant_id"], store_id),
             )
             if not staff:
-                raise ApiError("业务员不存在")
+                raise ApiError("业务员不存在或不属于所选门店")
         with connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -12278,6 +16828,8 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
         )
         if not customer:
             raise ApiError("客户不存在")
+        if customer["store_id"] != store_id:
+            raise ApiError("合同门店必须与客户门店一致")
         contract_type = str(body.get("contractType", ""))
         if contract_type not in CONTRACT_TYPES:
             raise ApiError("合同类型不正确")
@@ -12462,9 +17014,10 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             """
             SELECT COALESCE(SUM(amount),0) AS total
             FROM finance_receipts
-            WHERE contract_id=%s AND status='待审核'
+            WHERE contract_id=%s AND tenant_id=%s AND store_id=%s
+              AND status='待审核'
             """,
-            (contract_id,),
+            (contract_id, user["tenant_id"], store_id),
         )["total"]
         if contract["paid"] + pending + amount > contract["amount"]:
             raise ApiError("审核金额、未审核金额与本次收款合计不能超过成交金额")
@@ -12531,10 +17084,17 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             connection,
             """
             SELECT contract_id, amount, paid FROM contracts
-            WHERE contract_id=%s FOR UPDATE
+            WHERE contract_id=%s AND tenant_id=%s AND store_id=%s
+            FOR UPDATE
             """,
-            (receipt["contract_id"],),
+            (
+                receipt["contract_id"],
+                user["tenant_id"],
+                receipt["store_id"],
+            ),
         )
+        if not contract:
+            raise ApiError("收款单关联的合同不存在")
         if contract["paid"] + receipt["amount"] > contract["amount"]:
             raise ApiError("审核后已收款将超过合同成交金额")
         with connection.cursor() as cursor:
@@ -12604,12 +17164,13 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
             connection,
             """
             SELECT booking_id FROM room_bookings
-            WHERE room_id=%s AND deleted_at IS NULL
+            WHERE room_id=%s AND tenant_id=%s AND store_id=%s
+              AND deleted_at IS NULL
               AND status IN ('已订房','已入住')
               AND NOT (check_out<=%s OR check_in>=%s)
             LIMIT 1
             """,
-            (room_id, check_in, check_out),
+            (room_id, user["tenant_id"], store_id, check_in, check_out),
         )
         if conflict:
             raise ApiError("该日期范围内房间已被占用")
@@ -12718,9 +17279,29 @@ class MvpRequestHandler(BaseHTTPRequestHandler):
 
 
 def serve(host: str, port: int):
+    try:
+        runtime = validate_runtime_config()
+    except RuntimeConfigError as exc:
+        raise SystemExit(str(exc)) from exc
+    require_current_schema = parse_bool(
+        env("ERP_REQUIRE_CURRENT_SCHEMA"),
+        runtime["environment"] == "production",
+    )
+    if require_current_schema:
+        connection = connect()
+        try:
+            migrations = _migration_status(connection)
+        finally:
+            connection.close()
+        if not migrations["current"]:
+            raise SystemExit(
+                "Database schema is not current: "
+                + compact_json(migrations)
+            )
     server = ThreadingHTTPServer((host, port), MvpRequestHandler)
     print(f"QDF ERP MVP API listening on http://{host}:{port}", flush=True)
     print("Data source: MySQL (no JSON/mock fallback)", flush=True)
+    print(f"Runtime environment: {runtime['environment']}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -12738,13 +17319,28 @@ def main():
     parser.add_argument("--host", default=env("ERP_API_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(env("ERP_API_PORT", "3000")))
     parser.add_argument("--no-seed-rooms", action="store_true")
+    parser.add_argument(
+        "--include-baseline",
+        action="store_true",
+        help="apply V001-V003 after a DBA imports the legacy schema baseline",
+    )
     args = parser.parse_args()
 
     if args.command == "serve":
+        if args.include_baseline:
+            parser.error("--include-baseline is only valid with migrate")
         serve(args.host, args.port)
     elif args.command == "migrate":
-        print(json.dumps(apply_migrations(), ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                apply_migrations(include_baseline=args.include_baseline),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     elif args.command == "bootstrap":
+        if args.include_baseline:
+            parser.error("--include-baseline is only valid with migrate")
         print(
             json.dumps(
                 bootstrap(seed_rooms=not args.no_seed_rooms),
@@ -12753,6 +17349,8 @@ def main():
             )
         )
     elif args.command == "bootstrap-roles":
+        if args.include_baseline:
+            parser.error("--include-baseline is only valid with migrate")
         print(
             json.dumps(
                 bootstrap_role_accounts(),
@@ -12761,6 +17359,8 @@ def main():
             )
         )
     else:
+        if args.include_baseline:
+            parser.error("--include-baseline is only valid with migrate")
         print(json.dumps(verify_database(), ensure_ascii=False, indent=2))
 
 

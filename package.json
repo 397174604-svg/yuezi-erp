@@ -5,9 +5,11 @@
   "author": "Pan <panfree23@gmail.com>",
   "scripts": {
     "dev": "node --openssl-legacy-provider ./node_modules/@vue/cli-service/bin/vue-cli-service.js serve",
+    "dev:web:mvp": "node --openssl-legacy-provider ./node_modules/@vue/cli-service/bin/vue-cli-service.js serve --mode mvp",
     "dev:mvp": "node scripts/start-mvp.cjs",
     "api:mvp": "python server/mvp_api.py serve",
     "migrate:mvp": "python server/mvp_api.py migrate",
+    "migrate:mysql:baseline": "python server/mvp_api.py migrate --include-baseline",
     "bootstrap:mvp": "python server/mvp_api.py bootstrap",
     "bootstrap:mvp:roles": "python server/mvp_api.py bootstrap-roles",
     "import:legacy:access": "python scripts/import-filtered-legacy-access.py apply",
@@ -18,9 +20,17 @@
     "test:role-accounts": "python scripts/test-role-representative-accounts.py",
     "export:test:position-accounts": "python scripts/export-position-test-account-data.py --login-status 已通过",
     "verify:mvp": "python server/mvp_api.py verify",
+    "audit:db:security": "python scripts/audit-database-security.py",
+    "test:runtime:security": "python scripts/test-runtime-security.py",
+    "test:mysql:backup": "python scripts/test-mysql-backup.py",
+    "backup:mysql:check": "python scripts/mysql-backup.py check-tools",
     "test:mvp:rbac": "python scripts/test-mvp-rbac.py",
+    "test:p0:operations": "python scripts/test_p0_operations_surface.py",
+    "seed:local:acceptance": "python scripts/seed_local_acceptance_dataset.py",
+    "cleanup:local:acceptance": "python scripts/cleanup_local_acceptance_dataset.py",
     "docs:test:accounts": "python scripts/generate-account-access-test-doc.py",
     "build:mvp": "node --openssl-legacy-provider ./node_modules/@vue/cli-service/bin/vue-cli-service.js build --mode mvp",
+    "build:api": "node --openssl-legacy-provider ./node_modules/@vue/cli-service/bin/vue-cli-service.js build --mode api",
     "lint": "eslint --ext .js,.vue src",
     "build:prod": "node --openssl-legacy-provider ./node_modules/@vue/cli-service/bin/vue-cli-service.js build",
     "build:stage": "node --openssl-legacy-provider ./node_modules/@vue/cli-service/bin/vue-cli-service.js build --mode staging",
@@ -100,12 +110,6 @@
   "engines": {
     "node": ">=8.9",
     "npm": ">= 3.0.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "raphael": "2.2.8",
-      "squire-rte": "1.5.1"
-    }
   },
   "keywords": [
     "vue",

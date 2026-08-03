@@ -32,14 +32,6 @@
       </template>
     </div>
 
-    <el-alert
-      title="当前为脱敏演示表单，保存不会写入原妈妈宝盒 ERP。"
-      type="warning"
-      :closable="false"
-      show-icon
-      class="demo-alert"
-    />
-
     <template v-if="recordType === 'mother'">
       <section v-for="group in maternalGroups" :key="group.title" class="form-section">
         <h3>{{ group.title }}</h3>
@@ -413,7 +405,10 @@ export default {
       this.fileList = fileList.slice(-5)
     },
     save() {
-      this.$message.success(`${this.dialogTitle}已保存为脱敏演示记录`)
+      this.$emit('saved', {
+        recordType: this.recordType,
+        form: { ...this.form }
+      })
       this.innerVisible = false
     }
   }

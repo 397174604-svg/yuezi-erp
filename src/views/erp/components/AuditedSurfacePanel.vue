@@ -4,28 +4,12 @@
     :class="{ 'is-plain': plain }"
     :data-audited-title="config.title"
   >
-    <el-alert
-      v-if="!plain"
-      :title="config.evidenceNote"
-      type="success"
-      :closable="false"
-      show-icon
-      class="surface-alert"
-    />
-
     <el-card
       v-if="config.actions && config.actions.length"
       shadow="never"
       class="surface-card toolbar-card"
       data-audited-toolbar
     >
-      <div v-if="!plain" slot="header" class="surface-heading">
-        <div>
-          <strong>顶部工具栏</strong>
-          <span>标签、顺序与位置来自原 ERP 当前账号只读证据</span>
-        </div>
-        <el-tag size="mini" type="success">Schema-faithful</el-tag>
-      </div>
       <div class="toolbar-actions">
         <el-button
           v-for="action in config.actions"
@@ -45,13 +29,7 @@
       class="surface-card query-card"
       data-audited-query
     >
-      <div v-if="!plain" slot="header" class="surface-heading">
-        <div>
-          <strong>查询条件</strong>
-          <span>字段顺序、控件、选项和默认值逐页独立</span>
-        </div>
-        <el-tag size="mini" type="success">已核验</el-tag>
-      </div>
+      <div v-if="!plain" slot="header" class="surface-heading"><strong>查询条件</strong></div>
       <el-form :inline="true" :model="model" size="small" class="audited-query-form">
         <el-form-item
           v-for="field in config.filters"
@@ -151,13 +129,6 @@
       </el-form>
     </el-card>
 
-    <el-card
-      v-if="!plain && !config.actions.length && !hasQuerySurface"
-      shadow="never"
-      class="surface-card empty-surface"
-    >
-      原页面当前未发现顶部工具栏或主查询控件；本地未添加通用刷新、查询、导出按钮。
-    </el-card>
   </div>
 </template>
 
@@ -178,6 +149,10 @@ export default {
     showActionIcons: {
       type: Boolean,
       default: false
+    },
+    initialValues: {
+      type: Object,
+      default: () => ({})
     }
   },
   data() {
@@ -199,11 +174,20 @@ export default {
       handler() {
         this.resetModel()
       }
+    },
+    initialValues: {
+      deep: true,
+      handler() {
+        this.resetModel()
+      }
     }
   },
   methods: {
     resetModel() {
-      this.model = initialAuditedFilters(this.config.filters || [])
+      this.model = {
+        ...initialAuditedFilters(this.config.filters || []),
+        ...this.initialValues
+      }
     },
     isPrimaryQuery(action) {
       return /查询|搜索/.test(String(action).replace(/\s+/g, ''))
@@ -341,14 +325,15 @@ export default {
 }
 
 .legacy-choice-list button:hover {
-  color: #f45d91;
-  border-color: #f7a5bf;
+  color: #8c6a36;
+  border-color: #c9aa70;
+  background: #fbf8f1;
 }
 
 .legacy-choice-list button.active {
   color: #fff;
-  border-color: #f45d91;
-  background: #f45d91;
+  border-color: #b8945a;
+  background: linear-gradient(135deg, #c9aa70, #8c6a36);
 }
 
 .toolbar-actions ::v-deep .el-button span,

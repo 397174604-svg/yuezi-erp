@@ -8,20 +8,42 @@
           <div class="title-row">
             <i :class="pageConfig.icon" />
             <h2>{{ title }}</h2>
-            <el-tag size="small" type="warning">{{ pageConfig.evidenceLevel }}</el-tag>
           </div>
           <p>{{ pageConfig.description }}</p>
         </div>
-        <el-tag effect="plain">完成度：{{ pageConfig.completionLevel }}</el-tag>
       </div>
 
+      <el-card v-if="sharedWorkspaceTabs.length" shadow="never" class="shared-workbench-card">
+        <el-tabs :value="title" @tab-click="switchSharedWorkspace">
+          <el-tab-pane
+            v-for="tab in sharedWorkspaceTabs"
+            :key="tab.title"
+            :label="tab.label"
+            :name="tab.title"
+          />
+        </el-tabs>
+      </el-card>
+
       <el-alert
-        :title="pageConfig.evidenceNote"
-        type="warning"
+        v-if="pageConfig.externalStatus"
+        :title="pageConfig.externalStatus"
+        type="info"
         :closable="false"
         show-icon
         class="evidence-alert"
       />
+      <nursing-p0-workflow
+        v-if="p0WorkflowResources.includes(pageConfig.key)"
+        :resource="pageConfig.key"
+        :rows="filteredRows"
+        @select="handleWorkflowSelection"
+      />
+
+      <section v-if="nursingVisual" class="nursing-visual" :class="`visual-${nursingVisual.kind}`">
+        <div class="visual-copy"><span>{{ nursingVisual.kicker }}</span><h3>{{ nursingVisual.heading }}</h3><p>{{ nursingVisual.description }}</p></div>
+        <div class="visual-stages"><article v-for="(stage, index) in nursingVisual.stages" :key="stage"><b>{{ index + 1 }}</b><strong>{{ stage }}</strong><small>{{ nursingVisual.notes[index] }}</small></article></div>
+        <div class="visual-footer"><span>当前门店有效记录：{{ filteredRows.length }} 条</span><el-button size="mini" @click="handleQueryAction('查询')">刷新当前视图</el-button></div>
+      </section>
 
       <div
         v-if="pageConfig.actions.length && pageConfig.actionPlacement !== 'query-inline'"
@@ -120,13 +142,13 @@
         <el-card v-for="metric in metrics" :key="metric.label" shadow="hover">
           <span>{{ metric.label }}</span>
           <strong>{{ metric.value }}</strong>
-          <small>脱敏演示数据</small>
+          <small>当前门店业务数据</small>
         </el-card>
       </div>
 
       <el-card shadow="never" class="table-card">
         <div slot="header" class="table-header">
-          <span>{{ pageConfig.mode === 'dashboard' ? '今日护理任务（演示）' : `${title}列表（演示）` }}</span>
+          <span>{{ pageConfig.mode === 'dashboard' ? '今日护理任务' : `${title}列表` }}</span>
           <span>共 {{ filteredRows.length }} 条</span>
         </div>
         <el-table
@@ -135,7 +157,7 @@
           stripe
           size="small"
           highlight-current-row
-          row-key="planNo"
+          :row-key="row => row.recordId || row.id || row.planNo || row.recordNo"
           @current-change="handleCurrentChange"
           @selection-change="handleSelectionChange"
         >
@@ -181,6 +203,7 @@
         :page-title="title"
         :action="activeToolbarAction"
         :row="selectedRow || {}"
+        :form-fields="pageConfig.formFields || []"
         @saved="handleToolbarSaved"
       />
       <nursing-legacy-action-dialog
@@ -193,15 +216,29 @@
 </template>
 
 <script>
+import { mapGetters } from 'vuex'
 import Pagination from '@/components/Pagination'
-import { getNursingModuleData } from '@/api/erp-nursing'
+import { getNursingModuleData, performNursingModuleAction, saveNursingModuleRecord } from '@/api/erp-nursing'
 import { getNursingPageConfig } from '@/config/nursing-pages'
+import { findErpRouteByTitle, workspaceTabs } from '@/utils/erp-workbench-tabs'
 import NursingBabyDialog from './NursingBabyDialog'
 import NursingCenter from './NursingCenter'
 import NursingLegacyActionDialog from './NursingLegacyActionDialog'
 import NursingToolbarDialog from './NursingToolbarDialog'
+import NursingP0Workflow from '@/views/erp/components/NursingP0Workflow'
 
 const stores = ['中心广场旗舰店', '黄河路轻奢店']
+
+const STORE_BY_ROUTE_ID = {
+  1: stores[0],
+  2: stores[1]
+}
+
+function routeStoreName(route) {
+  const query = (route && route.query) || {}
+  if (STORE_BY_ROUTE_ID[Number(query.storeId)]) return STORE_BY_ROUTE_ID[Number(query.storeId)]
+  return stores.includes(query.store) ? query.store : ''
+}
 
 export default {
   name: 'NursingWorkbench',
@@ -210,6 +247,7 @@ export default {
     NursingCenter,
     NursingLegacyActionDialog,
     NursingToolbarDialog,
+    NursingP0Workflow,
     Pagination
   },
   data() {
@@ -219,20 +257,33 @@ export default {
       page: 1,
       pageSize: 10,
       loadingResource: '',
+      loadSequence: 0,
       selectedRow: null,
       selectedRows: [],
       activeToolbarAction: '',
       toolbarDialogVisible: false,
       babyDialogVisible: false,
-      planConfirmVisible: false
+      planConfirmVisible: false,
+      p0WorkflowResources: ['nursing-dashboard', 'health-assessments', 'check-in-handover']
     }
   },
   computed: {
+    ...mapGetters(['currentStoreId']),
+    businessStoreId() {
+      return String(this.currentStoreId || 'all')
+    },
+    isAllStores() {
+      return this.businessStoreId === 'all'
+    },
     title() {
-      return this.$route.meta && this.$route.meta.title ? this.$route.meta.title : '护理中心'
+      const meta = this.$route.meta || {}
+      return String(meta.configTitle || meta.title || '护理中心').replace(/\s*★\s*$/, '')
     },
     pageConfig() {
       return getNursingPageConfig(this.title)
+    },
+    sharedWorkspaceTabs() {
+      return workspaceTabs(this.pageConfig)
     },
     hasMultipleSelection() {
       return this.pageConfig.actions.some(action => action.selection === 'multiple')
@@ -278,6 +329,15 @@ export default {
         { label: '执行中', value: this.rows.filter(item => item.status === '执行中').length },
         { label: '已完成', value: this.rows.filter(item => item.status === '已完成').length }
       ]
+    },
+    nursingVisual() {
+      const views = {
+        'nursing-plan': { kind: 'task', kicker: '护理任务板', heading: '计划、执行与复核', description: '护理计划应按客户、房间和班次生成任务，完成后再归档为护理记录。', stages: ['生成计划', '护士执行', '异常复核', '归档留痕'], notes: ['来源：入住与护理评估', '记录执行人和时间', '异常转交责任人', '形成可追溯记录'] },
+        'nursing-roster-v2': { kind: 'shift', kicker: '班次排班', heading: '护理班次与交接', description: '按门店、日期和班次安排护理人员；交班前必须完成责任客户交接。', stages: ['早班', '中班', '晚班', '交接确认'], notes: ['待排班任务', '在岗执行任务', '夜间关注任务', '交接记录留痕'] },
+        'nursing-roster': { kind: 'shift', kicker: '班次排班', heading: '护理班次与交接', description: '按门店、日期和班次安排护理人员；交班前必须完成责任客户交接。', stages: ['早班', '中班', '晚班', '交接确认'], notes: ['待排班任务', '在岗执行任务', '夜间关注任务', '交接记录留痕'] },
+        'check-in-handover': { kind: 'handover', kicker: '入住交接单', heading: '客户入住护理交接', description: '入住时核对档案、护理计划、房间和注意事项，避免交班遗漏。', stages: ['档案核验', '护理计划', '房间交接', '责任人签收'], notes: ['客户与宝宝信息', '首日任务安排', '房间与物品确认', '交接人可追溯'] }
+      }
+      return views[this.pageConfig.key] || null
     }
   },
   watch: {
@@ -286,27 +346,53 @@ export default {
       handler() {
         this.initializePage()
       }
+    },
+    currentStoreId(value, previous) {
+      if (String(value) !== String(previous)) this.initializePage()
     }
   },
   methods: {
+    handleWorkflowSelection(row) {
+      this.selectedRow = row
+      this.selectedRows = row ? [row] : []
+    },
+    switchSharedWorkspace(tab) {
+      if (!tab.name || tab.name === this.title) return
+      const target = findErpRouteByTitle(this.$router.options.routes, tab.name)
+      if (!target) {
+        this.$message.error('未找到对应工作台入口，请联系管理员核对菜单配置。')
+        return
+      }
+      this.$router.push({ name: target.name, query: { ...this.$route.query }})
+    },
     initializePage() {
       this.filters = { ...(this.pageConfig.defaults || {}) }
+      const store = routeStoreName(this.$route)
+      if (store && Object.prototype.hasOwnProperty.call(this.filters, 'store')) {
+        this.filters.store = store
+      }
       this.page = 1
       this.selectedRow = null
       this.selectedRows = []
-      this.rows = this.createDemoRows()
+      this.rows = []
       this.loadModuleData()
     },
     async loadModuleData() {
       const resource = this.pageConfig.key
+      const sequence = ++this.loadSequence
       this.loadingResource = resource
       try {
-        const response = await getNursingModuleData(resource, this.filters)
-        if (this.loadingResource === resource && response.data && response.data.list && response.data.list.length) {
-          this.rows = response.data.list
+        const response = await getNursingModuleData(resource, {
+          ...this.filters,
+          storeId: this.businessStoreId
+        })
+        if (this.loadingResource === resource && this.loadSequence === sequence) {
+          this.rows = response.data && Array.isArray(response.data.list)
+            ? response.data.list
+            : []
         }
       } catch (error) {
-        // The independent mock is wired by the root integration step.
+        if (this.loadSequence === sequence) this.rows = []
       }
     },
     handleQueryAction(action) {
@@ -315,10 +401,11 @@ export default {
         return
       }
       if (action === '打印') {
-        this.$message.success('已生成打印预览（脱敏演示）')
+        window.print()
         return
       }
       this.page = 1
+      this.loadModuleData()
     },
     handleCurrentChange(row) {
       this.selectedRow = row || null
@@ -340,18 +427,35 @@ export default {
     },
     handleBusinessAction(action) {
       if (!this.requireSelection(action)) return
+      if (!['export', 'print'].includes(action.kind) && this.isAllStores) {
+        this.$message.warning('全部门店仅支持汇总查询，请先在顶栏选择具体门店')
+        return
+      }
+      if (action.label === '编辑' && this.selectedRow && !this.selectedRow.recordId) {
+        this.$message.warning('历史源记录为只读，请选择本地已落库记录')
+        return
+      }
 
       if (action.kind === 'delete') {
-        this.$confirm('确定删除选中的记录吗？本操作仅影响脱敏演示数据。', '删除确认', {
+        const targets = this.selectedRows.length ? this.selectedRows : [this.selectedRow]
+        if (targets.some(row => !row || !row.recordId)) {
+          this.$message.warning('历史源记录为只读，请选择本地已落库记录')
+          return
+        }
+        this.$confirm('确定删除选中的本地业务记录吗？删除会保留审计事件。', '删除确认', {
           confirmButtonText: '确定',
           cancelButtonText: '取消',
           type: 'warning'
-        }).then(() => {
-          const targets = this.selectedRows.length ? this.selectedRows : [this.selectedRow]
-          this.rows = this.rows.filter(row => !targets.includes(row))
+        }).then(async() => {
+          await Promise.all(targets.map(row => performNursingModuleAction(
+            this.pageConfig.key,
+            '删除',
+            { recordId: row.recordId, storeId: row.storeId || this.businessStoreId }
+          )))
+          await this.loadModuleData()
           this.selectedRow = null
           this.selectedRows = []
-          this.$message.success('删除成功（脱敏演示）')
+          this.$message.success('删除成功，审计记录已保留')
         }).catch(() => {})
         return
       }
@@ -360,7 +464,7 @@ export default {
         return
       }
       if (action.kind === 'print') {
-        this.$message.success('已生成打印预览（脱敏演示）')
+        window.print()
         return
       }
       if (this.title === '护理计划' && action.label === '新增宝宝') {
@@ -375,8 +479,21 @@ export default {
       this.activeToolbarAction = action.label
       this.toolbarDialogVisible = true
     },
-    handleToolbarSaved({ action }) {
-      this.$message.success(`${action}已保存（脱敏演示）`)
+    async handleToolbarSaved({ action, form }) {
+      if (this.isAllStores) return this.$message.warning('全部门店仅支持汇总查询，请先在顶栏选择具体门店')
+      try {
+        await saveNursingModuleRecord(this.pageConfig.key, {
+          ...form,
+          recordId: action === '编辑' && this.selectedRow
+            ? this.selectedRow.recordId
+            : undefined,
+          storeId: (this.selectedRow && this.selectedRow.storeId) || this.businessStoreId
+        })
+        await this.loadModuleData()
+        this.$message.success(`${action}已保存到当前门店`)
+      } catch (error) {
+        this.$message.warning(error.message || '保存失败，请核对门店与必填字段')
+      }
     },
     createDemoRows() {
       return Array.from({ length: 14 }, (_, index) => this.createDemoRow(index))
@@ -438,7 +555,7 @@ export default {
         assessor: ['演示护士A', '演示护士B', '演示营养师A'][index % 3],
         rounder: ['演示护士A', '演示医生A', '演示营养师A'][index % 3],
         doctorName: '演示医生A',
-        recorder: '演示记录员',
+        recorder: '张护士',
         creator: '演示制单人',
         confirmer: '演示确认人',
         handoverStaff: '演示交接员',
@@ -459,24 +576,24 @@ export default {
         birthWeight: `${3 + (index % 4) * 0.1}kg`,
         deliveryMode: index % 2 ? '顺产分娩' : '剖宫产分娩',
         assessmentType: index % 2 ? '宝宝健康评估' : '妈妈健康评估',
-        summary: '脱敏演示评估结论，待原系统字段核验。',
-        followUp: '脱敏演示跟进建议。',
-        dietType: '演示膳食方案',
-        tabooSummary: index % 3 ? '无演示禁忌' : '演示禁忌项',
-        nutritionGoal: '均衡营养（演示）',
+        summary: '评估结果稳定，按护理计划持续观察。',
+        followUp: '次日复查并记录变化。',
+        dietType: '营养膳食方案',
+        tabooSummary: index % 3 ? '暂无饮食禁忌' : '需关注饮食禁忌',
+        nutritionGoal: '均衡营养',
         roundType: '日常查房',
-        templateName: '演示查房模板',
-        result: '脱敏演示执行结果。',
-        observation: '脱敏演示观察记录。',
-        advice: '脱敏演示处理建议。',
-        mealPlan: '演示月子餐单',
-        finding: '脱敏演示查房发现。',
+        templateName: '日常查房模板',
+        result: '护理任务已按计划执行。',
+        observation: '客户状态稳定，持续观察。',
+        advice: '按护理计划继续执行。',
+        mealPlan: '当日月子餐单',
+        finding: '查房未发现异常。',
         adjustment: index % 3 ? '无需调整' : '待营养师确认',
         projectCount: 6 + index % 5,
         frequency: '每日1次',
-        consumables: '演示耗材×1',
-        vitalSummary: '体征演示摘要',
-        careResult: '护理完成（演示）',
+        consumables: '常规护理耗材×1',
+        vitalSummary: '体征平稳',
+        careResult: '护理已完成',
         feedingSummary: '喂养演示摘要',
         sleepSummary: '睡眠演示摘要',
         excretionSummary: '排便演示摘要',
@@ -526,7 +643,7 @@ export default {
       const blob = new Blob([`\uFEFF${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' })
       const link = document.createElement('a')
       link.href = URL.createObjectURL(blob)
-      link.download = `${this.title}-脱敏演示.csv`
+      link.download = `${this.title}.csv`
       link.click()
       URL.revokeObjectURL(link.href)
     },
@@ -574,8 +691,39 @@ export default {
 .evidence-alert,
 .business-toolbar,
 .filter-card,
-.metric-grid {
+.metric-grid,
+.p1-feature-card,
+.p1-back {
   margin-bottom: 14px;
+}
+
+.shared-workbench-card {
+  margin-bottom: 14px;
+}
+
+.shared-workbench-title {
+  margin-bottom: 4px;
+  color: #606266;
+  font-size: 13px;
+}
+
+.p1-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+
+  .el-button {
+    display: flex;
+    align-items: center;
+    margin: 0;
+    text-align: left;
+    white-space: normal;
+
+    strong {
+      margin-right: 8px;
+      color: #8f7cf6;
+    }
+  }
 }
 
 .business-toolbar {
@@ -643,6 +791,7 @@ export default {
     font-size: 30px;
   }
 }
+.nursing-visual { margin: 14px 0; padding: 18px; border: 1px solid #e4dcec; border-radius: 12px; background: #fff; }.visual-copy span { color: #8b65a0; font-size: 12px; font-weight: 700; }.visual-copy h3 { margin: 5px 0; color: #4b386d; }.visual-copy p { margin: 0; color: #887b94; font-size: 12px; }.visual-stages { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 15px; }.visual-stages article { position: relative; padding: 12px; border-radius: 9px; background: #faf7fc; }.visual-stages article:not(:last-child)::after { position: absolute; top: 50%; left: calc(100% + 1px); width: 8px; height: 1px; background: #d4c4de; content: ''; }.visual-stages b { display: inline-grid; width: 21px; height: 21px; border-radius: 50%; color: #fff; background: #8a63a2; place-items: center; font-size: 11px; }.visual-stages strong, .visual-stages small { display: block; }.visual-stages strong { margin-top: 7px; color: #5c4c6a; font-size: 13px; }.visual-stages small { margin-top: 3px; color: #988da2; font-size: 11px; }.visual-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; padding-top: 12px; border-top: 1px solid #eee8f2; color: #8c8197; font-size: 12px; }.visual-shift .visual-stages article { border-bottom: 3px solid #6a95c9; background: #f4f8fd; }.visual-handover .visual-stages article { border-bottom: 3px solid #63a581; background: #f5fbf7; }
 
 .table-header {
   display: flex;

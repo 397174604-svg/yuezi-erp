@@ -74,7 +74,7 @@ const defineBasicPage = ({
   originalNavid: ((basicOriginalUrls[title] || '').match(/navid=(\d+)/) || [])[1] || '',
   evidenceLevel: '菜单与 URL 已核验，页面字段待二次核验',
   completionLevel: 'Visible',
-  evidenceNote: '菜单标题、顺序、原页面 URL 与 navid 已在原 ERP 登录会话核验；本页模式、字段、控件类型、选项、默认值、树层级、联动、工具栏、表头和表单仍为结构草案。'
+  evidenceNote: '菜单标题和顺序已完成确认；页面字段、选项、联动、工具栏、表格和表单规则仍待业务确认。'
 })
 
 const basicDefinitions = [
@@ -274,7 +274,7 @@ export function getBasicPageConfig(title) {
     ...basicDefinitions[0],
     title,
     key: 'unverified-basic-page',
-    description: '当前标题未进入基础资料证据清单，待原系统二次核验。',
+    description: '该基础资料的业务字段和维护规则正在确认。',
     filters: [],
     columns: [],
     formFields: [],

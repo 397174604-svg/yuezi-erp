@@ -41,3 +41,6 @@ output/
 # Local runtime credentials
 .env.local
 .env.*.local
+
+# Local database and recovery snapshots
+backups/

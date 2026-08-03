@@ -68,6 +68,18 @@
       width: 100% !important;
     }
 
+    .el-menu-item,
+    .el-submenu__title {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: .2px;
+    }
+
+    .el-submenu .el-menu-item {
+      font-size: 13px;
+      font-weight: 500;
+    }
+
     .el-menu-item.is-active,
     .el-submenu.is-opened > .el-submenu__title {
       color: $menuActiveText !important;

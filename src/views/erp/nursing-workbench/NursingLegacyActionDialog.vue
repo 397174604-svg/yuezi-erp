@@ -10,7 +10,7 @@
   >
     <div class="legacy-action-page" :data-action="action">
       <el-alert
-        title="以下客户、项目、员工及金额均为脱敏演示数据；本页只复刻原妈妈宝盒的字段和交互，不会写入原 ERP。"
+        title="兼容页面仅用于字段核对；标记“开发中”的操作不会提交数据，也不代表护理或医疗结论。"
         type="warning"
         :closable="false"
         show-icon
@@ -660,7 +660,7 @@ const NursingPlanSheet = {
   },
   methods: {
     print() {
-      this.$message.success('已生成护理计划单打印预览（演示）')
+      window.print()
     }
   },
   template: `
@@ -677,8 +677,8 @@ const NursingPlanSheet = {
         <h2>{{ template }}</h2>
         <div class="overview-grid">
           <div v-for="item in overview" :key="item[0]"><span>{{ item[0] }}：</span><b>{{ item[0] === '客户姓名' ? (client.customerName || item[1]) : item[1] }}</b></div>
-          <div class="wide"><span>客户备注：</span><b>脱敏演示客户备注</b></div>
-          <div class="wide"><span>宝宝信息：</span><b>演示宝宝01 / 单胎 / 健康情况正常</b></div>
+          <div class="wide"><span>客户备注：</span><b>按客户档案及护理交接记录执行</b></div>
+          <div class="wide"><span>宝宝信息：</span><b>单胎 / 健康信息待护理人员评估</b></div>
         </div>
         <h3>护理服务计划明细</h3>
         <el-table :data="planRows" border size="mini">
@@ -811,13 +811,17 @@ const LegacyRecordPage = {
       this.selectedRow = row
     },
     toolbarAction(action) {
-      if (action === '导出' || action === '打印' || action === '产妇护理单') {
-        this.$message.success(`${action}已生成（演示）`)
+      if (action === '打印' || action === '产妇护理单') {
+        window.print()
+        return
+      }
+      if (action === '导出') {
+        this.$message.warning('该兼容页面导出仍在开发中，本次未生成文件')
         return
       }
       if (['删除', '审核', '反审核', '提交审核', '重置'].includes(action)) {
         if (!this.selectedRow) return this.$message.warning('请选中一行数据！')
-        this.$message.success(`${action}成功（演示）`)
+        this.$message.warning(`${action}仍在开发中，本次未提交任何业务数据`)
         return
       }
       this.detailAction = action
@@ -885,7 +889,7 @@ const LegacyRecordPage = {
                 <el-input v-else-if="field.type === 'staff'" v-model="detailForm[field.key]" readonly><el-button slot="append" @click="openStaff(field)">选择职员</el-button></el-input>
                 <el-checkbox v-else-if="field.type === 'checkbox'" v-model="detailForm[field.key]">{{ field.label }}</el-checkbox>
                 <el-upload v-else-if="field.type === 'upload'" action="#" :auto-upload="false"><el-button size="small">选择文件</el-button></el-upload>
-                <div v-else-if="field.type === 'signature'" class="signature-box">点击签名（演示）</div>
+                <div v-else-if="field.type === 'signature'" class="signature-box">电子签名开发中（不会提交）</div>
               </el-form-item>
             </el-col>
           </el-row>
@@ -944,7 +948,7 @@ export default {
   },
   methods: {
     mockSave(label) {
-      this.$message.success(`${label}已完成（脱敏演示，不写入原 ERP）`)
+      this.$message.warning(`${label}仍在开发中，本次未提交任何业务数据`)
     }
   }
 }

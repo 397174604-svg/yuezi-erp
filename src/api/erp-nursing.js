@@ -8,6 +8,14 @@ export function getNursingModuleData(resource, params) {
   })
 }
 
+export function getNursingStoreReferenceOptions(params) {
+  return request({
+    url: '/vue-element-admin/erp/nursing/modules/reference-options',
+    method: 'get',
+    params
+  })
+}
+
 export function saveNursingModuleRecord(resource, data) {
   return request({
     url: `/vue-element-admin/erp/nursing/modules/${resource}/save`,

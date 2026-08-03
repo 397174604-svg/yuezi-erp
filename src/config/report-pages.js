@@ -1,6 +1,6 @@
 import { applyOriginalEvidence } from './original-page-evidence'
 
-const storeOptions = ['中心广场旗舰店', '黄河路轻奢店']
+const storeOptions = ['奇德芬芳·建设路店（中心店）', '奇德芬芳·黄河路店']
 
 const field = (key, label, type = 'input', options = []) => ({
   key,
@@ -41,7 +41,7 @@ const defineReport = (title, key, family, description, filters, columns) => ({
   formulaStatus: '待原系统二次核验',
   exportStatus: '待原系统二次核验',
   printStatus: '待原系统二次核验',
-  evidenceNote: '仅菜单标题来自当前仓库菜单证据；筛选、枚举、默认值、列、汇总口径、公式、导出与打印均为结构草案，未从原 ERP 页面逐项核验。'
+  evidenceNote: '报表菜单已完成确认；筛选项、汇总口径、公式、导出和打印规则仍需业务确认。'
 })
 
 const reportDefinitions = [
@@ -206,11 +206,19 @@ const reportDefinitions = [
     [text('statDate', '统计日期'), text('store', '门店', 150), money('contractAmount', '合同金额'), money('receivedAmount', '收款金额'), money('refundAmount', '退款金额'), money('paymentAmount', '付款金额'), money('incomeAmount', '收入金额'), money('costAmount', '成本金额')]
   ),
   defineReport(
+    'C0经营月报',
+    'c0-monthly-operation',
+    '财务',
+    '按已入账收款流水汇总的经营月报；退款、付款和成本待对应业务流水接入后才显示真实值。',
+    [input('statMonth', '统计月份（YYYY-MM）'), store()],
+    [text('statMonth', '统计月份', 110), text('store', '门店', 150), count('documentCount', '收款单数'), money('receivedAmount', '收款金额'), money('incomeAmount', '收入金额'), money('refundAmount', '退款金额'), money('paymentAmount', '付款金额'), money('costAmount', '成本金额'), money('netAmount', '净收入')]
+  ),
+  defineReport(
     'C1 会员充值汇总明细表',
     'c1-member-recharge-summary',
     '财务',
-    '会员卡充值流水汇总明细结构草案。',
-    [dateRange('rechargeRange', '充值日期'), store(), input('customerName', '客户姓名'), input('cardNo', '会员卡号'), select('paymentMethod', '支付方式', ['待原系统核验'])],
+    '按门店查询已审核会员充值与预收款，展示充值、赠送金额和经办人。',
+    [dateRange('rechargeRange', '充值日期'), store(), input('customerName', '客户姓名'), input('cardNo', '会员卡号'), select('paymentMethod', '支付方式', ['现金', 'POS机刷卡', '支付宝付款', '银联云闪付', '微信结算', '转账汇款'])],
     [text('rechargeDate', '充值日期'), text('customerName', '客户姓名'), text('cardNo', '会员卡号', 150), text('store', '门店', 150), money('rechargeAmount', '充值金额'), money('giftAmount', '赠送金额'), text('paymentMethod', '支付方式'), text('operator', '经办人')]
   ),
   defineReport(
@@ -225,16 +233,16 @@ const reportDefinitions = [
     'C3 付款汇总分析表',
     'c3-payment-summary-analysis',
     '财务',
-    '付款用途、供应商与账户汇总分析结构草案。',
-    [dateRange('paymentRange', '付款日期'), store(), input('payee', '收款方'), select('paymentType', '付款类型', ['待原系统核验']), input('fundAccount', '资金账户')],
+    '按已打款费用单汇总付款用途、收款方与资金账户。',
+    [dateRange('paymentRange', '付款日期'), store(), input('payee', '收款方'), input('paymentType', '付款类型'), input('fundAccount', '资金账户')],
     [text('paymentType', '付款类型'), text('payee', '收款方', 180), text('store', '门店', 150), text('fundAccount', '资金账户', 150), count('documentCount', '单据数'), money('paymentAmount', '付款金额'), money('auditedAmount', '审核金额')]
   ),
   defineReport(
     'C4 资金收支出余额表',
     'c4-fund-income-expense-balance',
     '财务',
-    '资金账户收入、支出与余额结构草案。',
-    [dateRange('statRange', '统计日期'), store(), input('fundAccount', '资金账户'), select('businessType', '业务类型', ['待原系统核验'])],
+    '按已审核收款、已退款和已打款费用计算资金账户逐日收支与余额。',
+    [dateRange('statRange', '统计日期'), store(), input('fundAccount', '资金账户')],
     [text('statDate', '统计日期'), text('fundAccount', '资金账户', 150), text('store', '门店', 150), money('openingBalance', '期初余额'), money('incomeAmount', '收入金额'), money('expenseAmount', '支出金额'), money('closingBalance', '期末余额')]
   ),
   defineReport(
@@ -257,15 +265,15 @@ const reportDefinitions = [
     'C7 门店收入与成本统计表',
     'c7-store-income-cost-statistics',
     '财务',
-    '门店收入、成本与毛利结构草案。',
-    [dateRange('statRange', '统计日期'), store(), select('businessType', '业务类型', ['待原系统核验'])],
+    '按月汇总门店已审核净收入、已打款费用成本与经营毛利。',
+    [dateRange('statRange', '统计日期'), store()],
     [text('statPeriod', '统计期间'), text('store', '门店', 150), money('incomeAmount', '收入金额'), money('costAmount', '成本金额'), money('grossProfit', '毛利'), percent('grossMargin', '毛利率')]
   ),
   defineReport(
     'C8 商品毛利分析表',
     'c8-product-gross-profit-analysis',
     '财务',
-    '商品销售收入、成本与毛利结构草案。',
+    '按真实销售明细和品项成本价计算商品销售收入、成本与毛利。',
     [dateRange('saleRange', '销售日期'), store(), input('productName', '商品名称'), input('productCategory', '商品类别')],
     [text('productCode', '商品编码', 130), text('productName', '商品名称', 180), text('productCategory', '商品类别'), count('saleQuantity', '销售数量'), money('saleAmount', '销售金额'), money('costAmount', '成本金额'), money('grossProfit', '毛利'), percent('grossMargin', '毛利率')]
   ),
@@ -305,8 +313,8 @@ const reportDefinitions = [
     'C13收款退款汇总表',
     'c13-receipt-refund-summary',
     '财务',
-    '收款、退款与净收款汇总结构草案。',
-    [dateRange('statRange', '统计日期'), store(), input('customerName', '客户姓名'), select('businessType', '业务类型', ['待原系统核验'])],
+    '按日和门店汇总已审核收款、已完成退款与净收款。',
+    [dateRange('statRange', '统计日期'), store()],
     [text('statPeriod', '统计期间'), text('store', '门店', 150), count('receiptCount', '收款笔数'), money('receiptAmount', '收款金额'), count('refundCount', '退款笔数'), money('refundAmount', '退款金额'), money('netReceiptAmount', '净收款金额')]
   ),
   defineReport(
@@ -396,12 +404,44 @@ export const reportMenuTitles = reportDefinitions.map(report => report.title)
 
 applyOriginalEvidence('report', reportPageConfigs)
 
+// Product-level names in the 104-item registry are intentionally mapped here.
+// Previously they were not present in reportPageConfigs and rendered the first
+// report definition through the generic fallback.  Keep the resource explicit
+// and describe the capability boundary instead of showing a different report.
+const reportFeatureAliases = {
+  '数据报表': {
+    source: 'S13销售业绩报表',
+    presentation: 'report-builder',
+    dataState: 'partial',
+    description: '数据报表入口当前提供已接入经营数据的查询与 CSV 导出；自定义列、公式、打印模板尚未接入，因此不会生成模拟分析结果。'
+  },
+  '数据报表（自定义+导出）': {
+    source: 'S13销售业绩报表',
+    presentation: 'report-builder',
+    dataState: 'partial',
+    description: '数据报表入口当前提供已接入经营数据的查询与 CSV 导出；自定义列、公式、打印模板尚未接入，因此不会生成模拟分析结果。'
+  },
+  '经营月报': {
+    source: 'C0经营月报',
+    presentation: 'monthly-operation',
+    dataState: 'partial',
+    description: '经营月报按当前门店范围汇总已确认收款。退款、付款和成本记录不完整时保持为空或零值。'
+  }
+}
+
 export function getReportPageConfig(title) {
+  const alias = reportFeatureAliases[title]
+  if (alias) {
+    const source = reportPageConfigs[alias.source]
+    return { ...source, ...alias, title }
+  }
   return reportPageConfigs[title] || {
     ...reportDefinitions[0],
     title,
     key: 'unverified-report-page',
-    description: '当前标题未进入查询报表证据清单，待原系统二次核验。',
+    presentation: 'pending',
+    dataState: 'pending',
+    description: '该报表的业务口径和展示字段正在确认。',
     filters: [],
     columns: []
   }

@@ -5,12 +5,22 @@
         <div class="title-row">
           <i :class="pageConfig.icon" />
           <h2>{{ title }}</h2>
-          <el-tag size="small" type="success">{{ pageConfig.evidenceLevel }}</el-tag>
         </div>
         <p>{{ pageConfig.description }}</p>
       </div>
-      <el-tag effect="plain">完成度：{{ pageConfig.completionLevel }}</el-tag>
     </div>
+
+    <el-card v-if="sharedWorkspaceTabs.length" shadow="never" class="shared-workbench-card">
+      <div class="shared-workbench-title">{{ pageConfig.workspace.note }}</div>
+      <el-tabs :value="title" @tab-click="switchSharedWorkspace">
+        <el-tab-pane
+          v-for="tab in sharedWorkspaceTabs"
+          :key="tab.title"
+          :label="tab.label"
+          :name="tab.title"
+        />
+      </el-tabs>
+    </el-card>
 
     <audited-surface-panel
       :config="pageConfig"
@@ -19,11 +29,24 @@
       @query-action="handleQueryAction"
     />
 
+    <inventory-p0-workflow
+      v-if="p0WorkflowResources.includes(pageConfig.key)"
+      :resource="pageConfig.key"
+      :rows="filteredRows"
+      @select="selectedRow = $event"
+    />
+
+    <section v-if="inventoryVisual" class="inventory-visual" :class="`inventory-${inventoryVisual.kind}`">
+      <div class="inventory-copy"><span>{{ inventoryVisual.kicker }}</span><h3>{{ inventoryVisual.heading }}</h3><p>{{ inventoryVisual.description }}</p></div>
+      <div class="inventory-stages"><article v-for="(stage, index) in inventoryVisual.stages" :key="stage"><b>{{ index + 1 }}</b><strong>{{ stage }}</strong><small>{{ inventoryVisual.notes[index] }}</small></article></div>
+      <div class="inventory-footer"><span>当前查询记录：{{ filteredRows.length }} 条</span><el-button size="mini" @click="handleQueryAction('查询')">刷新</el-button></div>
+    </section>
+
     <el-card v-if="pageConfig.mode === 'import'" shadow="never" class="import-card">
-      <div slot="header">期初数据文件（演示）</div>
+      <div slot="header">期初数据文件</div>
       <el-upload action="#" :auto-upload="false" :limit="1" accept=".xls,.xlsx,.csv">
         <el-button size="small" type="primary">点击选择文件</el-button>
-        <div slot="tip" class="el-upload__tip">模板格式、大小限制和必填列待原系统二次核验；本地不会上传真实数据。</div>
+        <div slot="tip" class="el-upload__tip">支持 .xls、.xlsx、.csv，导入前请核对门店、仓库和必填列。</div>
       </el-upload>
     </el-card>
 
@@ -31,16 +54,24 @@
       <el-card v-for="metric in warningMetrics" :key="metric.label" shadow="hover">
         <span>{{ metric.label }}</span>
         <strong>{{ metric.value }}</strong>
-        <small>脱敏演示数据</small>
+        <small>来自当前门店业务数据</small>
       </el-card>
     </div>
 
     <el-card shadow="never" class="table-card">
       <div slot="header" class="card-header">
-        <span>{{ title }}列表（脱敏演示）</span>
+        <span>{{ title }}列表</span>
         <span>共 {{ filteredRows.length }} 条</span>
       </div>
-      <el-table :data="pagedRows" border stripe size="small" highlight-current-row>
+      <el-table
+        :data="pagedRows"
+        border
+        stripe
+        size="small"
+        highlight-current-row
+        @current-change="selectedRow = $event"
+        @selection-change="handleSelectionChange"
+      >
         <el-table-column type="selection" width="44" fixed="left" />
         <el-table-column type="index" label="序号" width="55" fixed="left" />
         <el-table-column
@@ -70,9 +101,9 @@
       />
     </el-card>
 
-    <el-dialog :title="`${dialogAction}（演示）`" :visible.sync="dialogVisible" width="680px">
+    <el-dialog :title="dialogAction" :visible.sync="dialogVisible" width="680px">
       <el-alert
-        title="该操作仅演示表单与状态反馈，不会写入真实库存、采购、应付或审批数据。字段和校验规则待原系统二次核验。"
+        title="保存后将生成当前门店业务记录；库存实物变动须按审核、出入库或调拨流程执行。"
         type="warning"
         :closable="false"
         show-icon
@@ -82,8 +113,14 @@
           <el-input v-if="field.type === 'input'" v-model="form[field.key]" />
           <el-input-number v-else-if="field.type === 'number'" v-model="form[field.key]" :min="0" />
           <el-input v-else-if="field.type === 'textarea'" v-model="form[field.key]" type="textarea" :rows="3" />
-          <el-select v-else-if="field.type === 'select'" v-model="form[field.key]" filterable clearable>
+          <el-select v-else-if="field.type === 'select'" v-model="form[field.key]" filterable clearable @change="field.key === 'store' ? handleDialogStoreChange() : null">
             <el-option v-for="option in field.options" :key="option" :label="option" :value="option" />
+          </el-select>
+          <el-select v-else-if="field.type === 'supplier-select'" v-model="form.supplier" filterable clearable :disabled="!form.store || referenceOptionsLoading">
+            <el-option v-for="option in referenceOptions.suppliers" :key="option.name" :label="option.name" :value="option.name" />
+          </el-select>
+          <el-select v-else-if="field.type === 'material-select'" v-model="form.materialName" filterable clearable :disabled="!form.store || referenceOptionsLoading">
+            <el-option v-for="option in referenceOptions.materials" :key="option.id" :label="`${option.name}${option.unit ? `（${option.unit}）` : ''}`" :value="option.name" />
           </el-select>
           <el-date-picker v-else-if="field.type === 'date'" v-model="form[field.key]" type="date" value-format="yyyy-MM-dd" />
           <el-upload v-else-if="field.type === 'upload'" action="#" :auto-upload="false" :limit="1">
@@ -91,26 +128,29 @@
           </el-upload>
         </el-form-item>
       </el-form>
-      <div v-else class="confirm-copy">当前动作的选择规则、校验、状态迁移及审批意见字段均待原系统二次核验。</div>
+      <div v-else class="confirm-copy">该状态操作会写入所选记录并保留审计事件。</div>
       <span slot="footer">
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="confirmDemoAction">确认演示</el-button>
+        <el-button type="primary" @click="confirmBusinessAction">确认</el-button>
       </span>
     </el-dialog>
   </div>
 </template>
 
 <script>
+import { mapGetters } from 'vuex'
 import Pagination from '@/components/Pagination'
-import { getInventoryModuleData, performInventoryModuleAction, saveInventoryModuleRecord } from '@/api/erp-inventory'
+import { getInventoryModuleData, getInventoryStoreReferenceOptions, performInventoryModuleAction, saveInventoryModuleRecord } from '@/api/erp-inventory'
 import { getInventoryPageConfig } from '@/config/inventory-pages'
+import { findErpRouteByTitle, workspaceTabs } from '@/utils/erp-workbench-tabs'
 import AuditedSurfacePanel from '@/views/erp/components/AuditedSurfacePanel'
+import InventoryP0Workflow from '@/views/erp/components/InventoryP0Workflow'
 
 const demoWarehouses = ['五楼总库', '销售部仓库', '产康部仓库', '护理部仓库', '膳食部仓库']
 
 export default {
   name: 'InventoryWorkbench',
-  components: { AuditedSurfacePanel, Pagination },
+  components: { AuditedSurfacePanel, InventoryP0Workflow, Pagination },
   data() {
     return {
       filters: {},
@@ -121,15 +161,32 @@ export default {
       dialogAction: '',
       dialogFields: [],
       form: {},
-      loadingResource: ''
+      loadingResource: '',
+      loadSequence: 0,
+      selectedRow: null,
+      selectedRows: [],
+      referenceOptions: { materials: [], suppliers: [] },
+      referenceOptionsLoading: false,
+      p0WorkflowResources: ['purchase-orders', 'stock-transfers', 'stocktakes', 'stock-warnings', 'warehouse-stock-query', 'stock-summary-report', 'batch-expiry']
     }
   },
   computed: {
+    ...mapGetters(['currentStoreId']),
+    businessStoreId() {
+      return String(this.currentStoreId || 'all')
+    },
+    isAllStores() {
+      return this.businessStoreId === 'all'
+    },
     title() {
-      return this.$route.meta && this.$route.meta.title ? this.$route.meta.title : '采购计划'
+      const meta = this.$route.meta || {}
+      return String(meta.configTitle || meta.title || '采购计划').replace(/\s*★\s*$/, '')
     },
     pageConfig() {
       return getInventoryPageConfig(this.title)
+    },
+    sharedWorkspaceTabs() {
+      return workspaceTabs(this.pageConfig)
     },
     filteredRows() {
       const activeFilters = Object.entries(this.filters).filter(([, value]) => {
@@ -151,11 +208,21 @@ export default {
     },
     warningMetrics() {
       return [
-        { label: '库存不足', value: 4 },
-        { label: '临期物料', value: 2 },
-        { label: '库存积压', value: 1 },
-        { label: '待处理', value: 5 }
+        { label: '库存不足', value: this.rows.filter(row => /库存为零|低于安全库存/.test(row.warningType)).length },
+        { label: '临期物料', value: this.rows.filter(row => row.warningType === '临期').length },
+        { label: '已过期', value: this.rows.filter(row => row.warningType === '已过期').length },
+        { label: '待处理', value: this.rows.filter(row => row.warningStatus === '未处理').length }
       ]
+    },
+    inventoryVisual() {
+      const views = {
+        'stock-ledger-report': { kind: 'ledger', kicker: '库存总账', heading: '收发存流水与结存', description: '按物料、批次和仓库追溯每一笔入库、出库与结存变化。', stages: ['期初结存', '入库流水', '出库流水', '期末结存'], notes: ['来源可追溯', '采购与退料', '领料与销售', '金额与数量'] },
+        'stock-transfers': { kind: 'transfer', kicker: '调拨双向确认', heading: '调出、在途与调入', description: '库存调拨必须由调出仓确认后进入在途，再由调入仓确认收货。', stages: ['调拨申请', '调出确认', '在途追踪', '调入确认'], notes: ['来源仓', '扣减库存', '单据跟踪', '增加库存'] },
+        stocktakes: { kind: 'stocktake', kicker: '盘点工作台', heading: '账面、实盘与差异审核', description: '盘点先锁定账面数量，录入实盘后生成差异，再进入审核调整。', stages: ['创建盘点', '录入实盘', '差异复核', '审核调整'], notes: ['盘点范围', '实盘数量', '盈亏明细', '审计留痕'] },
+        'stock-warnings': { kind: 'warning', kicker: '效期与库存预警', heading: '安全库存、临期与过期', description: '预警产生后应转为采购、调拨或报损动作，不能直接视为已处理。', stages: ['识别预警', '确认原因', '生成处理单', '处理留痕'], notes: ['数量 / 效期', '责任仓库', '采购或调拨', '关闭预警'] },
+        'batch-expiry': { kind: 'warning', kicker: '批次效期看板', heading: '批次、效期与处置', description: '按批次跟踪临期物料，处置结果需要回写库存与审计记录。', stages: ['扫描批次', '临期预警', '处置申请', '结果留痕'], notes: ['批次信息', '预警天数', '报损或调拨', '库存回写'] }
+      }
+      return views[this.pageConfig.key] || null
     }
   },
   watch: {
@@ -164,27 +231,45 @@ export default {
       handler() {
         this.initializePage()
       }
+    },
+    currentStoreId(value, previous) {
+      if (String(value) !== String(previous)) this.initializePage()
     }
   },
   methods: {
+    switchSharedWorkspace(tab) {
+      if (!tab.name || tab.name === this.title) return
+      const target = findErpRouteByTitle(this.$router.options.routes, tab.name)
+      if (!target) {
+        this.$message.error('未找到对应工作台入口，请联系管理员核对菜单配置。')
+        return
+      }
+      this.$router.push({ name: target.name, query: { ...this.$route.query }})
+    },
     initializePage() {
       this.filters = {}
       this.page = 1
       this.rows = []
+      this.selectedRow = null
+      this.selectedRows = []
       this.loadModuleData()
     },
     async loadModuleData() {
       const resource = this.pageConfig.key
+      const sequence = ++this.loadSequence
       this.loadingResource = resource
       try {
-        const response = await getInventoryModuleData(resource, this.filters)
-        if (this.loadingResource === resource) {
+        const response = await getInventoryModuleData(resource, {
+          ...this.filters,
+          storeId: this.businessStoreId
+        })
+        if (this.loadingResource === resource && this.loadSequence === sequence) {
           this.rows = response.data && Array.isArray(response.data.list)
             ? response.data.list
             : []
         }
       } catch (error) {
-        // Root integration wires the independent mock into mock/index.js.
+        if (this.loadSequence === sequence) this.rows = []
       }
     },
     createDemoRow(index) {
@@ -245,20 +330,30 @@ export default {
         creatorName: '演示制单人', createdAt: `${dateValue} 09:30`, auditedAt: `${dateValue} 14:20`,
         operatedAt: `${dateValue} 15:10`, paidAt: `${dateValue} 16:00`, importedAt: `${dateValue} 10:00`,
         lastHandledAt: `${dateValue} 17:00`, totalRows: 20, successRows: 20, failedRows: 0,
-        auditOpinion: '脱敏演示审批意见', returnReason: '脱敏演示退货原因', damageReason: '脱敏演示报损原因',
-        errorMessage: '', remark: '脱敏演示数据，字段待原系统二次核验。'
+        auditOpinion: '', returnReason: '', damageReason: '',
+        errorMessage: '', remark: ''
       }
     },
-    handleQueryAction(action) {
+    async handleQueryAction(action, filters = {}) {
       if (action === '导出') {
         this.exportCsv()
       } else if (action === '打印') {
         window.print()
       } else {
+        this.filters = filters
         this.page = 1
+        await this.loadModuleData()
       }
     },
+    handleSelectionChange(rows) {
+      this.selectedRows = rows
+      if (rows.length) this.selectedRow = rows[0]
+    },
     handleBusinessAction(action) {
+      if (this.isAllStores && !['导出', '打印'].includes(action)) {
+        this.$message.warning('全部门店仅支持汇总查询，请先在顶栏选择具体门店')
+        return
+      }
       if (action === '导出') {
         this.exportCsv()
         return
@@ -267,15 +362,61 @@ export default {
         window.print()
         return
       }
+      const saveAction = this.isSaveAction(action)
+      if (!saveAction && (!this.selectedRow || !this.selectedRow.recordId)) {
+        this.$message.warning('请先选择一条本地已落库记录')
+        return
+      }
+      if (action === '编辑' && (!this.selectedRow || !this.selectedRow.recordId)) {
+        this.$message.warning('历史源记录为只读，请选择本地已落库记录')
+        return
+      }
       this.dialogAction = action
-      this.form = {}
-      this.dialogFields = this.isCreateAction(action) ? this.pageConfig.formFields : this.actionFields(action)
+      this.dialogFields = saveAction ? this.pageConfig.formFields : this.actionFields(action)
+      this.form = this.dialogFields.reduce((result, field) => {
+        const value = this.selectedRow && action === '编辑' ? this.selectedRow[field.key] : undefined
+        result[field.key] = value !== undefined ? value : (field.type === 'number' ? 0 : '')
+        return result
+      }, {})
+      if (this.dialogFields.some(field => field.key === 'store') && !this.form.store) {
+        this.form.store = this.businessStoreId === '1'
+          ? '中心广场旗舰店'
+          : this.businessStoreId === '2' ? '黄河路轻奢店' : ''
+      }
+      this.loadStoreReferenceOptions()
       this.dialogVisible = true
+    },
+    async handleDialogStoreChange() {
+      this.form.supplier = ''
+      this.form.materialName = ''
+      await this.loadStoreReferenceOptions()
+    },
+    async loadStoreReferenceOptions() {
+      if (!this.form.store) {
+        this.referenceOptions = { materials: [], suppliers: [] }
+        return
+      }
+      this.referenceOptionsLoading = true
+      try {
+        const response = await getInventoryStoreReferenceOptions({
+          store: this.form.store,
+          storeId: this.businessStoreId
+        })
+        this.referenceOptions = {
+          materials: response.data.materials || [],
+          suppliers: response.data.suppliers || []
+        }
+      } catch (error) {
+        this.referenceOptions = { materials: [], suppliers: [] }
+        this.$message.warning(error.message || '无法加载当前门店物料和供应商')
+      } finally {
+        this.referenceOptionsLoading = false
+      }
     },
     actionFields(action) {
       if (/审核/.test(action)) {
         return [
-          { key: 'auditResult', label: '审核结果', type: 'select', options: ['审核通过', '审核不通过'], verified: false },
+          { key: 'auditResult', label: '审核结果', type: 'select', options: ['审核通过', '审核不通过'], required: true, verified: false },
           { key: 'auditOpinion', label: '审核意见', type: 'textarea', verified: false }
         ]
       }
@@ -295,21 +436,49 @@ export default {
       }
       return []
     },
-    async confirmDemoAction() {
+    async confirmBusinessAction() {
+      if (this.isAllStores) return this.$message.warning('全部门店仅支持汇总查询，请先在顶栏选择具体门店')
+      const missing = this.dialogFields.find(field => (
+        field.required &&
+        (this.form[field.key] === '' || this.form[field.key] === null ||
+          this.form[field.key] === undefined ||
+          (field.type === 'number' &&
+            (['actualQuantity', 'safetyQuantity', 'maxQuantity'].includes(field.key)
+              ? Number(this.form[field.key]) < 0
+              : Number(this.form[field.key]) <= 0)))
+      ))
+      if (missing) {
+        this.$message.warning(`请填写有效的${missing.label}`)
+        return
+      }
       try {
-        if (this.isCreateAction(this.dialogAction)) {
-          await saveInventoryModuleRecord(this.pageConfig.key, this.form)
+        if (this.isSaveAction(this.dialogAction)) {
+          await saveInventoryModuleRecord(this.pageConfig.key, {
+            ...this.form,
+            recordId: this.dialogAction === '编辑' && this.selectedRow
+              ? this.selectedRow.recordId
+              : undefined,
+            storeId: (this.selectedRow && this.selectedRow.storeId) || this.businessStoreId
+          })
         } else {
-          await performInventoryModuleAction(this.pageConfig.key, this.dialogAction, this.form)
+          await performInventoryModuleAction(this.pageConfig.key, this.dialogAction, {
+            ...this.form,
+            recordId: this.selectedRow && this.selectedRow.recordId,
+            storeId: (this.selectedRow && this.selectedRow.storeId) || this.businessStoreId
+          })
         }
-        this.$message.success(`${this.dialogAction}演示完成，未写入真实业务数据`)
+        await this.loadModuleData()
+        this.$message.success(`${this.dialogAction}保存成功`)
       } catch (error) {
-        this.$message.warning('独立 Mock 尚待根任务接入，当前仅完成前端演示')
+        this.$message.warning(error.message || '业务操作失败，请核对门店与必填字段')
       }
       this.dialogVisible = false
     },
     isCreateAction(action) {
       return /添加|新建|采购入库|设置预警值/.test(action)
+    },
+    isSaveAction(action) {
+      return action === '编辑' || this.isCreateAction(action)
     },
     primaryAction(action) {
       return /添加|新建|采购入库|审核|出库|导入数据/.test(action)
@@ -320,7 +489,7 @@ export default {
       const blob = new Blob([`\uFEFF${[header.join(','), ...lines].join('\n')}`], { type: 'text/csv;charset=utf-8' })
       const link = document.createElement('a')
       link.href = URL.createObjectURL(blob)
-      link.download = `${this.title}-脱敏演示.csv`
+      link.download = `${this.title}.csv`
       link.click()
       URL.revokeObjectURL(link.href)
     },
@@ -355,6 +524,8 @@ export default {
   p { margin: 8px 0 0; color: #738098; }
 }
 .evidence-alert, .action-card, .filter-card, .import-card, .table-card { margin-bottom: 14px; }
+.shared-workbench-card { margin-bottom: 14px; }
+.shared-workbench-title { margin-bottom: 4px; color: #606266; font-size: 13px; }
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .action-card ::v-deep .el-button { margin: 0 8px 8px 0; }
 .filter-card ::v-deep .el-form-item { margin-bottom: 10px; }
@@ -368,6 +539,7 @@ export default {
   span, small { display: block; color: #7b879b; }
   strong { display: block; margin: 10px 0; color: #314b75; font-size: 26px; }
 }
+.inventory-visual { margin: 14px 0; padding: 18px; border: 1px solid #dce8e3; border-radius: 12px; background: #fbfefc; }.inventory-copy span { color: #397a67; font-size: 12px; font-weight: 700; }.inventory-copy h3 { margin: 5px 0; color: #315e53; }.inventory-copy p { margin: 0; color: #71887f; font-size: 12px; }.inventory-stages { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 15px; }.inventory-stages article { position: relative; padding: 12px; border-radius: 9px; background: #fff; border-bottom: 3px solid #6fa487; }.inventory-stages article:not(:last-child)::after { position: absolute; top: 50%; left: calc(100% + 1px); width: 8px; height: 1px; background: #c2d8cc; content: ''; }.inventory-stages b { display: inline-grid; width: 21px; height: 21px; border-radius: 50%; color: #fff; background: #579373; place-items: center; font-size: 11px; }.inventory-stages strong, .inventory-stages small { display: block; }.inventory-stages strong { margin-top: 7px; color: #46685d; font-size: 13px; }.inventory-stages small { margin-top: 3px; color: #8ba098; font-size: 11px; }.inventory-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; padding-top: 12px; border-top: 1px solid #e2eee8; color: #81978e; font-size: 12px; }.inventory-transfer .inventory-stages article { border-bottom-color: #6c91ba; background: #fbfdff; }.inventory-transfer .inventory-stages b { background: #5e86b1; }.inventory-stocktake .inventory-stages article { border-bottom-color: #b68f55; background: #fffcf6; }.inventory-stocktake .inventory-stages b { background: #a57d43; }.inventory-warning .inventory-stages article { border-bottom-color: #d08061; background: #fffaf8; }.inventory-warning .inventory-stages b { background: #c67050; }
 .dialog-form { margin-top: 18px; }
 .dialog-form ::v-deep .el-select,
 .dialog-form ::v-deep .el-date-editor,

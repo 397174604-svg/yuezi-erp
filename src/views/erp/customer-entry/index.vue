@@ -4,7 +4,7 @@
       <div>
         <div class="eyebrow">客户管理 · 新增客户档案</div>
         <h1>客户录入</h1>
-        <p>按原 ERP 客户录入页复核，共 3 个信息分组、46 项可见资料，带出来源、房间、套餐、介绍人与跟踪人选择联动。</p>
+        <p>客户资料分为 3 个信息分组，共 46 项可见资料，并支持来源、房间、套餐、介绍人与所属业务员联动选择。</p>
       </div>
       <div class="heading-actions">
         <el-button icon="el-icon-document" :loading="draftSaving" @click="handleSaveDraft">保存草稿</el-button>
@@ -34,8 +34,15 @@
               </el-col>
               <el-col :lg="8" :md="12" :xs="24">
                 <el-form-item label="客户电话" prop="mobile">
-                  <el-input v-model.trim="form.mobile" maxlength="20" placeholder="手机号或联系电话" @blur="handleContactBlur">
-                    <el-select slot="prepend" v-model="form.countryCode" class="country-select">
+                  <el-input
+                    v-model.trim="form.mobile"
+                    :maxlength="mobileMaxLength"
+                    :placeholder="mobilePlaceholder"
+                    inputmode="numeric"
+                    @input="handleMobileInput"
+                    @blur="handleContactBlur"
+                  >
+                    <el-select slot="prepend" v-model="form.countryCode" class="country-select" @change="handleCountryCodeChange">
                       <el-option v-for="item in countryCodeOptions" :key="item.value" :label="item.label" :value="item.value" />
                     </el-select>
                     <el-button slot="append" icon="el-icon-search" title="客户查重" @click="handleDuplicateCheck" />
@@ -68,7 +75,7 @@
                     <button v-for="tag in legacyCustomerTags" :key="tag" type="button" :class="{ active: form.tags.includes(tag) }" @click="toggleTag(tag)">
                       <i :class="form.tags.includes(tag) ? 'el-icon-check' : 'el-icon-plus'" />{{ tag }}
                     </button>
-                    <small>标签来自原 ERP，可在“数据字典”中调整</small>
+                    <small>标签可在“数据字典”中调整</small>
                   </div>
                 </el-form-item>
               </el-col>
@@ -85,7 +92,7 @@
             </div>
             <el-row :gutter="22">
               <el-col :lg="8" :md="12" :xs="24">
-                <el-form-item label="意向分店"><el-select v-model="form.intendedStore" clearable placeholder="请选择" class="full-control"><el-option v-for="item in stores" :key="item" :label="item" :value="item" /></el-select></el-form-item>
+                <el-form-item label="意向分店"><el-select v-model="form.intendedStore" clearable placeholder="请选择" class="full-control" @change="handleIntendedStoreChange"><el-option v-for="item in stores" :key="item" :label="item" :value="item" /></el-select></el-form-item>
               </el-col>
               <el-col :lg="8" :md="12" :xs="24">
                 <el-form-item label="客户预产期"><el-date-picker v-model="form.dueDate" type="date" value-format="yyyy-MM-dd" placeholder="选择预产期" class="full-control" @change="syncPlannedStayDate" /></el-form-item>
@@ -127,7 +134,7 @@
 
           <el-card id="detail-section" shadow="never" class="form-card">
             <div slot="header" class="section-heading">
-              <div><span class="section-index detail">03</span><div><h2>详细信息</h2><p>证件、生产、介绍、跟踪归属及补充资料</p></div></div>
+              <div><span class="section-index detail">03</span><div><h2>详细信息</h2><p>证件、生产、介绍、业务归属及补充资料</p></div></div>
               <span>{{ sectionCompletion.detail.completed }}/{{ sectionCompletion.detail.total }} 已填写</span>
             </div>
             <el-row :gutter="22">
@@ -154,7 +161,7 @@
               <el-col :lg="8" :md="12" :xs="24"><el-form-item label="本次胎次"><el-select v-model="form.pregnancyCount" class="full-control"><el-option v-for="item in pregnancyCounts" :key="item" :label="item" :value="item" /></el-select></el-form-item></el-col>
               <el-col :lg="8" :md="12" :xs="24"><el-form-item label="客户区域"><el-input v-model="form.area" readonly placeholder="点击选择客户区域" @click.native="openSelector('area')"><el-button slot="append" icon="el-icon-location-outline" @click.stop="openSelector('area')" /></el-input></el-form-item></el-col>
               <el-col :lg="8" :md="12" :xs="24"><el-form-item label="到店时间"><el-date-picker v-model="form.firstVisitAt" type="datetime" value-format="yyyy-MM-dd HH:mm:ss" placeholder="选择到店时间" class="full-control" /></el-form-item></el-col>
-              <el-col :lg="8" :md="12" :xs="24"><el-form-item label="跟踪人"><el-input v-model="form.trackerName" readonly placeholder="点击选择跟踪人" @click.native="openSelector('tracker')"><el-button slot="append" icon="el-icon-user-solid" @click.stop="openSelector('tracker')" /></el-input></el-form-item></el-col>
+              <el-col :lg="8" :md="12" :xs="24"><el-form-item label="所属业务员" prop="trackerId"><el-input v-model="form.trackerName" readonly placeholder="点击选择所属业务员" @click.native="openSelector('tracker')"><el-button slot="append" icon="el-icon-user-solid" @click.stop="openSelector('tracker')" /></el-input></el-form-item></el-col>
               <el-col :lg="8" :md="12" :xs="24"><el-form-item label="客户民族"><el-input v-model.trim="form.ethnicity" maxlength="20" placeholder="如：汉族" /></el-form-item></el-col>
               <el-col :lg="8" :md="12" :xs="24"><el-form-item label="客户籍贯"><el-input v-model.trim="form.nativePlace" maxlength="50" placeholder="请输入籍贯" /></el-form-item></el-col>
               <el-col :lg="8" :md="12" :xs="24"><el-form-item label="工作单位"><el-input v-model.trim="form.workUnit" maxlength="80" placeholder="请输入工作单位" /></el-form-item></el-col>
@@ -178,7 +185,7 @@
 
       <aside>
         <el-card shadow="never" class="side-card progress-card">
-          <div class="progress-head"><div><small>资料完整度</small><b>{{ completionRate }}%</b></div><el-progress type="circle" :percentage="completionRate" :width="76" :stroke-width="7" color="#ff6f9c" :show-text="false" /></div>
+          <div class="progress-head"><div><small>资料完整度</small><b>{{ completionRate }}%</b></div><el-progress type="circle" :percentage="completionRate" :width="76" :stroke-width="7" color="#B8945A" :show-text="false" /></div>
           <div v-for="section in progressSections" :key="section.key" class="progress-row" @click="scrollToSection(section.key)">
             <span><i :class="section.icon" />{{ section.label }}</span><b>{{ section.completed }}/{{ section.total }}</b>
           </div>
@@ -190,8 +197,8 @@
           <div v-if="duplicateChecked" class="duplicate-state" :class="{ danger: duplicateRecords.length }"><i :class="duplicateRecords.length ? 'el-icon-warning' : 'el-icon-success'" />{{ duplicateRecords.length ? `发现 ${duplicateRecords.length} 条疑似重复记录` : '未发现重复客户' }}</div>
         </el-card>
         <el-card shadow="never" class="side-card trace-card">
-          <div slot="header" class="side-title"><span>归属与追踪</span></div>
-          <dl><dt>跟踪人</dt><dd>{{ form.trackerName || '未选择' }}</dd><dt>所属部门</dt><dd>{{ form.trackerDepartment || '—' }}</dd><dt>数据范围</dt><dd>本人及所属门店</dd><dt>草稿状态</dt><dd>{{ draftStatus }}</dd></dl>
+          <div slot="header" class="side-title"><span>客户归属</span></div>
+          <dl><dt>所属业务员</dt><dd>{{ form.trackerName || '未选择' }}</dd><dt>所属部门</dt><dd>{{ form.trackerDepartment || '—' }}</dd><dt>数据范围</dt><dd>本人及所属门店</dd><dt>草稿状态</dt><dd>{{ draftStatus }}</dd></dl>
         </el-card>
       </aside>
     </div>
@@ -223,7 +230,7 @@
       <el-result v-if="!duplicateRecords.length" icon="success" title="未发现重复客户" sub-title="可继续保存当前客户资料" />
       <div v-else>
         <el-alert type="warning" :closable="false" show-icon title="发现疑似重复客户，请核对后再决定是否继续录入。" />
-        <el-table :data="duplicateRecords" class="duplicate-table"><el-table-column prop="code" label="客户编号" width="140" /><el-table-column prop="name" label="客户姓名" /><el-table-column prop="mobile" label="联系电话" /><el-table-column prop="status" label="客户状态" /><el-table-column prop="trackerName" label="跟踪人" /></el-table>
+        <el-table :data="duplicateRecords" class="duplicate-table"><el-table-column prop="code" label="客户编号" width="140" /><el-table-column prop="name" label="客户姓名" /><el-table-column prop="mobile" label="联系电话" /><el-table-column prop="status" label="客户状态" /><el-table-column prop="trackerName" label="所属业务员" /></el-table>
       </div>
       <span slot="footer"><el-button @click="duplicateDialogVisible = false">关闭</el-button><el-button v-if="duplicateRecords.length" type="primary" @click="continueAfterDuplicate">确认继续录入</el-button></span>
     </el-dialog>
@@ -240,6 +247,7 @@ import {
   customerStatusOptions,
   countryCodeOptions,
   legacyCustomerTags,
+  legacyCustomerSources,
   stores,
   roomTypes,
   mealPackages,
@@ -258,9 +266,17 @@ const DRAFT_STORAGE_KEY = 'erp-customer-entry-draft'
 export default {
   name: 'CustomerEntryPage',
   data() {
-    const contactValidator = (rule, value, callback) => {
+    const mobileValidator = (rule, value, callback) => {
       if (!this.form.mobile && !this.form.wechat) return callback(new Error('客户电话与 QQ/微信至少填写一项'))
       if (this.form.status === '同意签合同' && !this.form.mobile) return callback(new Error('同意签合同时必须填写客户电话'))
+      if (this.form.mobile) {
+        if (this.form.countryCode === '+86' && !/^1[3-9]\d{9}$/.test(this.form.mobile)) {
+          return callback(new Error('请输入正确的中国大陆 11 位手机号'))
+        }
+        if (this.form.countryCode !== '+86' && !/^\d{6,15}$/.test(this.form.mobile)) {
+          return callback(new Error('请输入 6—15 位数字联系电话'))
+        }
+      }
       callback()
     }
     return {
@@ -295,16 +311,22 @@ export default {
       estimatedAmount: 0,
       rules: {
         name: [{ required: true, message: '请输入客户姓名', trigger: 'blur' }],
-        mobile: [{ validator: contactValidator, trigger: 'blur' }],
-        wechat: [{ validator: contactValidator, trigger: 'blur' }],
+        mobile: [{ validator: mobileValidator, trigger: 'blur' }],
         status: [{ required: true, message: '请选择客户状态', trigger: 'change' }],
         source: [{ required: true, message: '请选择客户来源', trigger: 'change' }],
+        trackerId: [{ required: true, message: '请选择所属业务员', trigger: 'change' }],
         documentNo: [{ pattern: /^[0-9A-Za-z()（）-]*$/, message: '证件号格式不正确', trigger: 'blur' }],
         email: [{ type: 'email', message: '电子邮箱格式不正确', trigger: 'blur' }]
       }
     }
   },
   computed: {
+    mobileMaxLength() {
+      return this.form.countryCode === '+86' ? 11 : 15
+    },
+    mobilePlaceholder() {
+      return this.form.countryCode === '+86' ? '请输入 11 位手机号码' : '请输入 6—15 位数字联系电话'
+    },
     sectionCompletion() {
       return Object.keys(sectionFieldKeys).reduce((result, key) => {
         const keys = sectionFieldKeys[key]
@@ -331,6 +353,7 @@ export default {
         { label: '电话或 QQ/微信', ready: Boolean(this.form.mobile || this.form.wechat) },
         { label: '客户状态', ready: Boolean(this.form.status) },
         { label: '客户来源', ready: Boolean(this.form.source) },
+        { label: '所属业务员', ready: Boolean(this.form.trackerId) },
         { label: '签约状态已补手机号', ready: this.form.status !== '同意签合同' || Boolean(this.form.mobile) }
       ]
     },
@@ -341,7 +364,7 @@ export default {
       return this.lastDraftSavedAt ? `已保存 ${this.lastDraftSavedAt}` : '尚未保存'
     },
     selectorTitle() {
-      return { source: '客户来源', room: '意向房间', package: '意向套餐', tracker: '跟踪人', introducer: '介绍人', area: '客户区域' }[this.selectorType] || '选择资料'
+      return { source: '客户来源', room: '意向房间', package: '意向套餐', tracker: '所属业务员', introducer: '介绍人', area: '客户区域' }[this.selectorType] || '选择资料'
     },
     selectorMainLabel() {
       return { room: '房间号', package: '套餐名称', tracker: '姓名', introducer: '姓名', area: '区域名称' }[this.selectorType] || '名称'
@@ -351,6 +374,7 @@ export default {
       let rows = this.options[mapping[this.selectorType]] || []
       if (this.selectorType === 'room' && this.form.intendedStore) rows = rows.filter(item => item.store === this.form.intendedStore)
       if (this.selectorType === 'package' && this.form.intendedStore && rows.some(item => item.store)) rows = rows.filter(item => item.store === this.form.intendedStore)
+      if (this.selectorType === 'tracker' && this.form.intendedStore && rows.some(item => item.store)) rows = rows.filter(item => item.store === this.form.intendedStore)
       if (this.selectorType === 'introducer' && this.form.introducerType) rows = rows.filter(item => item.type === this.form.introducerType)
       return rows
     },
@@ -384,7 +408,17 @@ export default {
       this.loading = true
       try {
         const response = await getCustomerEntryOptions()
-        this.options = response.data
+        this.options = {
+          ...response.data,
+          sources: legacyCustomerSources.map((name, index) => ({
+            id: `legacy-source-${index + 1}`,
+            name
+          }))
+        }
+        if (this.form.source && !legacyCustomerSources.includes(this.form.source)) {
+          this.form.source = ''
+          this.form.sourceId = ''
+        }
         const allowedStores = (response.data.stores || []).map(item => item.name)
         if (allowedStores.length) {
           if (!allowedStores.includes(this.form.intendedStore)) {
@@ -421,13 +455,40 @@ export default {
     handleStatusChange() {
       this.$refs.customerForm.validateField('mobile')
     },
+    handleMobileInput(value) {
+      const normalized = String(value || '').replace(/\D/g, '').slice(0, this.mobileMaxLength)
+      if (normalized !== this.form.mobile) this.form.mobile = normalized
+      this.duplicateChecked = false
+      this.allowDuplicate = false
+    },
+    handleCountryCodeChange() {
+      this.handleMobileInput(this.form.mobile)
+      this.$nextTick(() => this.$refs.customerForm.validateField('mobile'))
+    },
     handleContactBlur() {
       this.$refs.customerForm.validateField('mobile')
-      this.$refs.customerForm.validateField('wechat')
       if ((this.form.mobile && this.form.mobile.length >= 7) || this.form.wechat) this.runDuplicateCheck(false)
     },
     handleToStoreChange(value) {
       if (value && !this.form.firstVisitAt) this.form.firstVisitAt = this.formatDateTime(new Date())
+    },
+    handleIntendedStoreChange() {
+      Object.assign(this.form, {
+        room: '',
+        roomId: '',
+        roomType: '',
+        roomTypeId: '',
+        packageName: '',
+        packageId: '',
+        packageVersionId: '',
+        packagePriceRuleId: '',
+        packageAmount: '',
+        trackerName: '',
+        trackerId: '',
+        trackerDepartment: ''
+      })
+      this.estimatedAmount = 0
+      this.$nextTick(() => this.$refs.customerForm.validateField('trackerId'))
     },
     syncPlannedStayDate(value) {
       if (value && !this.form.plannedStayDate) this.form.plannedStayDate = value
@@ -484,7 +545,10 @@ export default {
         })
         if (!this.form.contractAmount) this.form.contractAmount = String(item.amount)
       }
-      if (this.selectorType === 'tracker') Object.assign(this.form, { trackerName: item.name, trackerId: item.id, trackerDepartment: item.department })
+      if (this.selectorType === 'tracker') {
+        Object.assign(this.form, { trackerName: item.name, trackerId: item.id, trackerDepartment: item.department })
+        this.$nextTick(() => this.$refs.customerForm.validateField('trackerId'))
+      }
       if (this.selectorType === 'introducer') Object.assign(this.form, { introducerName: item.name, introducerId: item.id, introducerPhone: item.mobile })
       if (this.selectorType === 'area') Object.assign(this.form, { area: item.name, areaId: item.id })
       this.selectorVisible = false
@@ -598,7 +662,7 @@ export default {
 .page-heading { display:flex; align-items:center; justify-content:space-between; gap:20px; margin-bottom:18px; }
 .page-heading h1 { margin:5px 0 7px; font-size:25px; color:#1f2d3d; }
 .page-heading p { margin:0; max-width:850px; color:#8a96a8; font-size:13px; line-height:1.6; }
-.eyebrow { color:#ff6f9c; font-size:12px; font-weight:700; letter-spacing:1px; }
+.eyebrow { color:#8c6a36; font-size:12px; font-weight:700; letter-spacing:1px; }
 .heading-actions { display:flex; gap:8px; flex-shrink:0; }
 .source-alert { margin-bottom:16px; border:1px solid #dbeafe; background:#f7fbff; }
 .entry-layout { display:grid; grid-template-columns:minmax(0,1fr) 260px; gap:16px; align-items:start; }
@@ -610,20 +674,20 @@ export default {
 .section-heading h2 { margin:0 0 4px; color:#263445; font-size:16px; }
 .section-heading p { margin:0; color:#9aa5b4; font-size:12px; font-weight:400; }
 .section-heading>span { color:#9aa5b4; font-size:12px; }
-.section-index { width:38px; height:38px; display:grid; place-items:center; border-radius:10px; color:#fff; background:linear-gradient(135deg,#ff8bb0,#ff5f90); font-size:12px; font-weight:700; }
-.section-index.intention { background:linear-gradient(135deg,#6ba8ff,#4f7df3); }
-.section-index.detail { background:linear-gradient(135deg,#65c9b3,#36a892); }
+.section-index { width:38px; height:38px; display:grid; place-items:center; border-radius:10px; color:#fff; background:linear-gradient(135deg,#d9bf8b,#8c6a36); font-size:12px; font-weight:700; box-shadow:0 8px 16px -12px rgba(111,84,43,.8); }
+.section-index.intention { background:linear-gradient(135deg,#c9aa70,#80602f); }
+.section-index.detail { background:linear-gradient(135deg,#b99a62,#6f542b); }
 .customer-form ::v-deep .el-form-item { margin-bottom:21px; }
 .customer-form ::v-deep .el-form-item__label { color:#5d6979; font-size:13px; }
 .customer-form ::v-deep .el-input__inner,.customer-form ::v-deep .el-textarea__inner { border-color:#dfe5ec; }
-.customer-form ::v-deep .el-input__inner:focus,.customer-form ::v-deep .el-textarea__inner:focus { border-color:#ff6f9c; }
+.customer-form ::v-deep .el-input__inner:focus,.customer-form ::v-deep .el-textarea__inner:focus { border-color:#b8945a; box-shadow:0 0 0 2px rgba(184,148,90,.1); }
 .full-control { width:100%; }
 .country-select { width:128px; }
 .customer-form ::v-deep .country-select .el-input__inner { padding-left:12px; padding-right:26px; }
 .selector-input ::v-deep .el-input__inner { cursor:pointer; background:#fbfcfe; }
 .tag-selector { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-height:40px; }
 .tag-selector button { padding:7px 12px; border:1px solid #dfe5ec; border-radius:16px; color:#687588; background:#fff; cursor:pointer; transition:.2s; }
-.tag-selector button:hover { border-color:#ff9fbc; color:#ff5f90; }
+.tag-selector button:hover { border-color:#c9aa70; color:#8c6a36; background:#fbf8f1; }
 .tag-selector button.active { border-color:#ffb0c9; color:#ef5484; background:#fff0f5; }
 .tag-selector button i { margin-right:4px; }
 .tag-selector small { margin-left:4px; color:#a0a9b7; }
@@ -643,10 +707,10 @@ aside { position:sticky; top:76px; }
 .trace-card dl { display:grid; grid-template-columns:75px 1fr; gap:12px 6px; margin:0; font-size:12px; }.trace-card dt { color:#9aa5b4; }.trace-card dd { margin:0; color:#526074; text-align:right; word-break:break-word; }
 .selector-toolbar { margin-bottom:15px; }.selector-toolbar .el-input { width:320px; }
 .source-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
-.source-grid button { display:flex; flex-direction:column; align-items:flex-start; min-height:88px; padding:14px; border:1px solid #e2e7ee; border-radius:8px; background:#fff; cursor:pointer; text-align:left; transition:.2s; }.source-grid button:hover { border-color:#ff8cad; box-shadow:0 5px 14px rgba(255,111,156,.12); transform:translateY(-1px); }.source-grid i { color:#ff6f9c; font-size:17px; }.source-grid b { margin:8px 0 4px; color:#344157; }.source-grid small { color:#98a3b2; }
+.source-grid button { display:flex; flex-direction:column; align-items:flex-start; min-height:88px; padding:14px; border:1px solid #e7dfd2; border-radius:8px; background:#fffdf9; cursor:pointer; text-align:left; transition:.2s; }.source-grid button:hover { border-color:#c9aa70; box-shadow:0 7px 18px rgba(111,84,43,.12); transform:translateY(-1px); }.source-grid i { color:#b8945a; font-size:17px; }.source-grid b { margin:8px 0 4px; color:#344157; }.source-grid small { color:#98a3b2; }
 .selector-tip { margin-top:10px; color:#9ca6b4; font-size:12px; }
 .duplicate-table { margin-top:15px; }
-.success-content { padding:6px 0 14px; text-align:center; }.success-content>span { display:grid; place-items:center; width:64px; height:64px; margin:0 auto 15px; border-radius:50%; color:#fff; background:linear-gradient(135deg,#5bd2b6,#31ad90); font-size:30px; }.success-content h2 { margin:0 0 13px; color:#2f3d51; }.success-content p { margin:7px 0; color:#7e8998; }.success-content p b { color:#ff5f90; }
+.success-content { padding:6px 0 14px; text-align:center; }.success-content>span { display:grid; place-items:center; width:64px; height:64px; margin:0 auto 15px; border-radius:50%; color:#fff; background:linear-gradient(135deg,#5bd2b6,#31ad90); font-size:30px; }.success-content h2 { margin:0 0 13px; color:#2f3d51; }.success-content p { margin:7px 0; color:#7e8998; }.success-content p b { color:#8c6a36; }
 @media (max-width:1200px) { .entry-layout { grid-template-columns:1fr; } aside { position:static; display:grid; grid-template-columns:repeat(3,1fr); gap:16px; } .side-card { margin-bottom:0; } }
 @media (max-width:768px) { .customer-entry-page { padding:14px; } .page-heading { align-items:flex-start; flex-direction:column; } .heading-actions { width:100%; }.heading-actions .el-button { flex:1; } aside { grid-template-columns:1fr; }.form-footer>div { display:none; }.source-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 </style>

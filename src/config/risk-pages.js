@@ -29,8 +29,8 @@ export const riskPageConfigs = {
     navid: '',
     evidenceLevel: '待原系统二次核验',
     completionLevel: 'Visible',
-    evidenceNote: '仅“风控服务 → 悦禧风控”菜单名称来自本地菜单证据；页面 URL、布局、筛选、按钮、表格、枚举、弹窗和流程均未从原 ERP 核验。',
-    domainDraft: '本地迁移文档将风控领域概括为“异常规则、风险事件和处置”，以下内容仅用于承载后续实证，不代表原系统页面结构。',
+    evidenceNote: '风控服务菜单已完成确认；页面筛选、操作、风险状态和处置流程仍需业务确认。',
+    domainDraft: '风控服务围绕异常规则、风险事件和处置记录组织，具体规则以业务确认结果为准。',
     stores,
     draftTabs: [
       {

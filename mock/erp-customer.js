@@ -1,3 +1,9 @@
+const {
+  confirmedPackageCatalog,
+  confirmedCenterRoomSlots,
+  confirmedYellowRiverRoomSlots
+} = require('./client-confirmed-data')
+
 const sources = [
   { id: 'SRC01', name: '客户介绍', group: '转介绍' },
   { id: 'SRC02', name: '住附近', group: '自然客流' },
@@ -14,22 +20,31 @@ const sources = [
   { id: 'SRC13', name: '内部资源', group: '内部资源' }
 ]
 
-const rooms = [
-  { id: 'R0301', name: '301', type: '豪华套房', store: '中心广场旗舰店', dailyPrice: 1188, status: '可预订' },
-  { id: 'R0302', name: '302', type: '舒适大床', store: '中心广场旗舰店', dailyPrice: 968, status: '可预订' },
-  { id: 'R0501', name: '501', type: '5楼VIP', store: '中心广场旗舰店', dailyPrice: 1588, status: '待清洁' },
-  { id: 'R0601', name: '601', type: '至尊女王', store: '黄河路轻奢店', dailyPrice: 1988, status: '可预订' },
-  { id: 'R0602', name: '602', type: '总统套房', store: '黄河路轻奢店', dailyPrice: 2688, status: '已预订' }
-]
+const rooms = [...confirmedCenterRoomSlots, ...confirmedYellowRiverRoomSlots].map(item => ({
+  id: `R${item.id}`,
+  name: item.room_no,
+  type: item.room_type,
+  store: Number(item.store_id) === 2 ? '黄河路轻奢店' : '中心广场旗舰店',
+  dailyPrice: item.daily_price,
+  status: item.status === '已预订' ? '已预订' : '可预订',
+  roomNoConfirmed: item.room_no_confirmed !== false,
+  dataSource: item.data_source
+}))
 
-const packages = [
-  { id: 'PKG01', name: '基础套餐', days: 28, amount: 36800, roomType: '舒适大床' },
-  { id: 'PKG02', name: '修复套餐', days: 28, amount: 56800, roomType: '豪华套房' },
-  { id: 'PKG03', name: '修养套餐', days: 42, amount: 86800, roomType: '尊享套房' },
-  { id: 'PKG04', name: '私享套餐', days: 28, amount: 108800, roomType: '臻享套房' },
-  { id: 'PKG05', name: '女王套餐（私人定制）', days: 42, amount: 168800, roomType: '至尊女王' },
-  { id: 'PKG06', name: '总统套餐（私人定制）', days: 56, amount: 268800, roomType: '总统套房' }
-]
+const packages = confirmedPackageCatalog.map(item => ({
+  id: item.packageNo,
+  packageVersionId: item.id,
+  packagePriceRuleId: item.packageNo,
+  name: item.packageName,
+  days: item.days,
+  amount: item.dealPrice,
+  originalPrice: item.originalPrice,
+  activityPrice: item.activityPrice,
+  roomType: item.roomType,
+  store: item.store,
+  versionNo: item.versionNo,
+  dataStatus: item.dataStatus
+}))
 
 const trackers = [
   { id: 'U0001', name: '管理员', department: '管理部', store: '全部门店' },
@@ -85,15 +100,25 @@ module.exports = [
   {
     url: '/vue-element-admin/erp/customer$',
     type: 'post',
-    response: config => ({
-      code: 20000,
-      data: {
-        customerId: `CUST-${Date.now()}`,
-        customerCode: `KH-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`,
-        status: config.body.status,
-        createdAt: new Date().toLocaleString('zh-CN', { hour12: false })
+    response: config => {
+      const mobile = String(config.body.mobile || '').replace(/\D/g, '')
+      const countryCode = config.body.countryCode || '+86'
+      if (mobile && countryCode === '+86' && !/^1[3-9]\d{9}$/.test(mobile)) {
+        return { code: 40000, message: '请输入正确的中国大陆 11 位手机号', data: null }
       }
-    })
+      if (mobile && countryCode !== '+86' && !/^\d{6,15}$/.test(mobile)) {
+        return { code: 40000, message: '请输入 6—15 位数字联系电话', data: null }
+      }
+      return {
+        code: 20000,
+        data: {
+          customerId: `CUST-${Date.now()}`,
+          customerCode: `KH-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`,
+          status: config.body.status,
+          createdAt: new Date().toLocaleString('zh-CN', { hour12: false })
+        }
+      }
+    }
   },
   {
     url: '/vue-element-admin/erp/customer/modules/[^/]+$',

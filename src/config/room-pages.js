@@ -1,9 +1,8 @@
 const stores = ['中心广场旗舰店', '黄河路轻奢店']
 
 export const roomTypes = [
-  '豪华套房', '舒适大床', '温馨雅间', '尊享套房', '舒适小套', '5楼VIP', '3楼VIP', '臻享套房',
-  '至尊女王', '精致尊享A', '精致尊享B', '总统套房', '基础套餐', '修复套餐', '修养套餐',
-  '私享套餐', '女王套餐 （私人定制）', '总统套餐 （私人定制）'
+  '大床房', '小套房', '特价房', '套房', '一房一厅', '总统套房', '女王套房',
+  'VIP302', 'VIP512', '待甲方确认'
 ]
 
 const input = (key, label, placeholder = '') => ({ key, label, type: 'input', placeholder })
@@ -65,7 +64,7 @@ export const roomPageConfigs = {
       input('room', '房号'),
       select('store', '门店', stores),
       select('roomType', '房型', roomTypes),
-      select('direction', '朝向', ['东', '西', '南', '北']),
+      select('direction', '朝向', ['南', '北']),
       input('floor', '楼层', '楼层数'),
       select('displayType', '类型', ['按楼层', '按房型'])
     ],
@@ -116,7 +115,7 @@ export const roomPageConfigs = {
     key: 'smart-allocation',
     mode: 'smart-allocation',
     icon: 'el-icon-guide',
-    description: '按分店、入住日期、房间类型和楼层生成无需换房或一次换房的推荐方案。',
+    description: '按分店、入住日期和实时房态生成整住或一次换房方案；套餐确定天数与价格，房间由用户在同店可用库存中选择。',
     actions: [],
     filters: [
       select('store', '分店', stores),

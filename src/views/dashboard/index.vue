@@ -1,79 +1,801 @@
 <template>
-  <div class="dashboard-page">
-    <section class="welcome-bar">
-      <div><span>2026年7月22日 · 星期三</span><h1>下午好，admin</h1><p>这里是奇德芬芳月子会所今日经营概览。</p></div>
-      <div class="welcome-actions"><el-select v-model="store" size="small"><el-option label="中心广场旗舰店" value="中心广场旗舰店" /><el-option label="黄河路轻奢店" value="黄河路轻奢店" /></el-select><el-button size="small" icon="el-icon-refresh" @click="$message.success('数据已刷新')">刷新</el-button></div>
+  <div v-loading="loading" class="dashboard-page">
+    <section class="dashboard-section dashboard-toolbar">
+      <div class="section-title">
+        <i />
+        <div>
+          <h1>数据看板</h1>
+          <p>客户、合同、收款、预约与客房数据</p>
+        </div>
+      </div>
+      <div class="toolbar-actions">
+        <el-select v-model="storeId" size="small" @change="handleDashboardStoreChange">
+          <el-option v-if="isSystemAdmin" label="全部门店" value="all" />
+          <el-option
+            v-for="store in raw.stores"
+            :key="store.id"
+            :label="store.name"
+            :value="String(store.id)"
+          />
+        </el-select>
+        <el-radio-group v-model="period" size="small">
+          <el-radio-button label="today">今天</el-radio-button>
+          <el-radio-button label="week">本周</el-radio-button>
+          <el-radio-button label="month">本月</el-radio-button>
+          <el-radio-button label="quarter">本季度</el-radio-button>
+          <el-radio-button label="year">本年度</el-radio-button>
+        </el-radio-group>
+        <el-button size="small" icon="el-icon-refresh" @click="loadData">刷新</el-button>
+      </div>
     </section>
 
-    <div class="summary-grid">
-      <div v-for="card in summaries" :key="card.label" class="summary-card">
-        <div class="summary-icon" :style="{background:card.soft,color:card.color}"><i :class="card.icon" /></div>
-        <div><span>{{ card.label }}</span><b>{{ card.value }}<small>{{ card.unit }}</small></b><em :class="card.trend >= 0 ? 'up' : 'down'"><i :class="card.trend >= 0 ? 'el-icon-top' : 'el-icon-bottom'" /> {{ Math.abs(card.trend) }}% 较上月</em></div>
-      </div>
-    </div>
+    <section class="kpi-grid">
+      <router-link
+        v-for="item in kpis"
+        :key="item.label"
+        :to="item.route"
+        :class="['kpi-card', item.color]"
+      >
+        <span>{{ item.label }}</span>
+        <b>{{ item.prefix }}{{ item.value }}<small>{{ item.unit }}</small></b>
+        <em>{{ periodText }} · {{ item.note }}</em>
+        <i :class="item.icon" />
+      </router-link>
+    </section>
 
-    <el-row :gutter="16">
+    <section class="dashboard-section stat-strip">
+      <router-link v-for="item in roomStats" :key="item.label" :to="item.route">
+        <span>{{ item.label }}</span>
+        <b :class="item.tone">{{ item.value }}</b>
+      </router-link>
+    </section>
+
+    <el-row :gutter="14" class="visual-row">
       <el-col :lg="16" :xs="24">
-        <el-card shadow="never" class="panel occupancy-panel">
-          <div slot="header" class="panel-head"><div><b>房态概览</b><span>实时入住与预订状态</span></div><router-link to="/room/item-1">进入房态图 <i class="el-icon-arrow-right" /></router-link></div>
-          <div class="occupancy-top"><div class="rate-ring"><div><b>58.3%</b><span>入住率</span></div></div><div class="room-stats"><div v-for="stat in roomStats" :key="stat.label"><i :style="{background:stat.color}" /><b>{{ stat.value }}</b><span>{{ stat.label }}</span></div></div></div>
-          <div class="mini-room-grid"><div v-for="room in rooms" :key="room.no" :class="`mini-room ${room.status}`"><b>{{ room.no }}</b><span>{{ room.label }}</span></div></div>
-        </el-card>
+        <section class="dashboard-section trend-panel">
+          <div class="section-title compact">
+            <i />
+            <div><h2>近 7 日经营趋势</h2><p>合同金额与已审核收款金额</p></div>
+            <div class="chart-legend"><span><i class="contract" />合同金额</span><span><i class="receipt" />收款金额</span></div>
+          </div>
+          <div class="trend-chart">
+            <div v-for="item in trendRows" :key="item.key" class="trend-column">
+              <div class="bar-area">
+                <i class="contract-bar" :style="{ height: trendHeight(item.contract) }"><em>{{ shortMoney(item.contract) }}</em></i>
+                <i class="receipt-bar" :style="{ height: trendHeight(item.receipt) }"><em>{{ shortMoney(item.receipt) }}</em></i>
+              </div>
+              <span>{{ item.label }}</span>
+            </div>
+          </div>
+        </section>
       </el-col>
       <el-col :lg="8" :xs="24">
-        <el-card shadow="never" class="panel todo-panel">
-          <div slot="header" class="panel-head"><div><b>待办流程</b><span>需要您处理的业务</span></div><el-badge :value="750" /></div>
-          <div v-for="todo in todos" :key="todo.label" class="todo-row"><span class="todo-icon" :style="{background:todo.soft,color:todo.color}"><i :class="todo.icon" /></span><div><b>{{ todo.label }}</b><span>{{ todo.note }}</span></div><em>{{ todo.value }}</em></div>
-          <el-button class="all-todo" plain>查看全部待办</el-button>
-        </el-card>
+        <section class="dashboard-section room-visual-panel">
+          <div class="section-title compact"><i /><div><h2>房态结构</h2><p>当前门店实时客房状态</p></div></div>
+          <div class="room-visual-content">
+            <div class="occupancy-ring" :style="occupancyRingStyle">
+              <div><b>{{ occupancyRate }}%</b><span>入住率</span></div>
+            </div>
+            <div class="room-legend">
+              <router-link v-for="item in roomVisuals" :key="item.label" :to="item.route">
+                <span><i :style="{ background: item.color }" />{{ item.label }}</span>
+                <b>{{ item.value }}</b>
+              </router-link>
+            </div>
+          </div>
+        </section>
       </el-col>
     </el-row>
 
-    <el-card shadow="never" class="panel warning-panel">
-      <div slot="header" class="panel-head"><div><b>预警平台</b><span>跨业务风险与服务提醒</span></div><div class="legend"><span><i class="high" />高优先级</span><span><i class="normal" />一般提醒</span></div></div>
-      <div class="warning-groups">
-        <div v-for="group in warnings" :key="group.title" class="warning-group"><div class="warning-title"><i :class="group.icon" :style="{color:group.color}" /><span>{{ group.title }}</span><b :style="{color:group.color}">{{ group.total }}</b></div><div class="warning-items"><div v-for="item in group.items" :key="item.name"><span>{{ item.name }}</span><b>{{ item.value }}</b></div></div></div>
-      </div>
-    </el-card>
-
-    <el-row :gutter="16">
-      <el-col :lg="15" :xs="24"><el-card shadow="never" class="panel trend-panel"><div slot="header" class="panel-head"><div><b>经营趋势</b><span>近七月合同回款情况</span></div><el-radio-group v-model="metric" size="mini"><el-radio-button label="合同额" /><el-radio-button label="回款额" /></el-radio-group></div><div class="trend-chart"><div class="chart-labels"><span>30万</span><span>20万</span><span>10万</span><span>0</span></div><div v-for="bar in trendBars" :key="bar.month" class="trend-bar"><div class="bar-pair"><i :style="{height:bar.contract+'%'}" /><i :style="{height:bar.receipt+'%'}" /></div><span>{{ bar.month }}</span></div></div></el-card></el-col>
-      <el-col :lg="9" :xs="24"><el-card shadow="never" class="panel source-panel"><div slot="header" class="panel-head"><div><b>客户来源</b><span>本月有效客资渠道</span></div></div><div v-for="source in sources" :key="source.label" class="source-row"><span>{{ source.label }}</span><div><i :style="{width:source.percent+'%',background:source.color}" /></div><b>{{ source.percent }}%</b></div></el-card></el-col>
+    <el-row :gutter="14">
+      <el-col :lg="17" :xs="24">
+        <section class="dashboard-section process-panel">
+          <div class="section-title compact"><i /><h2>待办流程</h2></div>
+          <div class="process-grid">
+            <router-link v-for="item in todoItems" :key="item.label" :to="item.route">
+              <span>{{ item.label }}</span>
+              <b v-if="item.value">{{ item.value }}</b>
+              <i class="el-icon-arrow-right" />
+            </router-link>
+          </div>
+        </section>
+      </el-col>
+      <el-col :lg="7" :xs="24">
+        <section class="dashboard-section notice-panel">
+          <div class="section-title compact">
+            <i />
+            <h2>通知公告</h2>
+            <router-link to="/system/item-6">更多</router-link>
+          </div>
+          <div class="notice-row">
+            <span>系统菜单已按功能清单优化</span>
+            <time>{{ todayText }}</time>
+          </div>
+          <div class="notice-row">
+            <span>预约与智能排房已进入业务使用</span>
+            <time>{{ todayText }}</time>
+          </div>
+        </section>
+      </el-col>
     </el-row>
 
-    <footer class="dashboard-footer">授权单位：濮阳市奇德芬芳母婴护理有限公司 <span>服务截止日期：2027/6/10</span><span>ERP 演示复刻版 V1.0</span></footer>
+    <section class="dashboard-section warning-panel">
+      <div class="section-title compact">
+        <i />
+        <div><h2>预警平台</h2><p>仅展示当前系统已有数据能够计算的提醒</p></div>
+      </div>
+      <div class="warning-summary">
+        <span>客户预警 <b>{{ warningTotals.customer }}</b></span>
+        <span>财务预警 <b>{{ warningTotals.finance }}</b></span>
+        <span>客房预警 <b>{{ warningTotals.room }}</b></span>
+        <span>服务预警 <b>{{ warningTotals.service }}</b></span>
+        <span>仓库预警 <b>{{ warningTotals.inventory }}</b></span>
+      </div>
+      <div class="warning-grid">
+        <router-link v-for="item in warningItems" :key="item.label" :to="item.route">
+          <span>{{ item.label }}</span>
+          <b :class="item.tone">{{ item.value }}</b>
+          <small>{{ item.unit }}</small>
+        </router-link>
+      </div>
+    </section>
+
+    <footer>
+      <span>当前范围：{{ currentStoreName }} · {{ periodText }}</span>
+      <span>数据更新时间：{{ updatedAt }}</span>
+      <span>开派月子会所经营管理系统</span>
+    </footer>
   </div>
 </template>
 
 <script>
+import { mapGetters } from 'vuex'
+import { getCustomerModuleData } from '@/api/erp-customer'
+import { getMvpList, getMvpOptions, getMvpOverview } from '@/api/erp-mvp'
+import { getRehabModuleData } from '@/api/erp-rehab'
+
+function responseData(response, fallback) {
+  return response && response.data ? response.data : fallback
+}
+
+function settle(request, fallback) {
+  return request.then(response => responseData(response, fallback)).catch(() => fallback)
+}
+
+function rows(payload) {
+  return payload && Array.isArray(payload.list) ? payload.list : []
+}
+
+function numberValue(value) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : 0
+}
+
+function dateKey(value) {
+  return String(value || '').slice(0, 10)
+}
+
+function pad(value) {
+  return String(value).padStart(2, '0')
+}
+
+function localDate(date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
 export default {
   name: 'Dashboard',
   data() {
     return {
-      store: '中心广场旗舰店',
-      metric: '合同额',
-      summaries: [
-        { label: '账户总收入', value: '248,500', unit: '元', trend: 12.8, icon: 'el-icon-wallet', color: '#B8945A', soft: '#FBF3E5' },
-        { label: '客户总数量', value: '326', unit: '人', trend: 8.2, icon: 'el-icon-user', color: '#4f8cf7', soft: '#edf4ff' },
-        { label: '已入住客房', value: '21', unit: '间', trend: 11, icon: 'el-icon-house', color: '#45b8ac', soft: '#eaf9f7' },
-        { label: '已签合同', value: '8', unit: '份', trend: -3.4, icon: 'el-icon-document-checked', color: '#f5ba35', soft: '#fff8e6' }
-      ],
-      roomStats: [{ label: '房间总数', value: 36, color: '#cdd5df' }, { label: '在住', value: 21, color: '#45b8ac' }, { label: '预订', value: 9, color: '#6f8ff7' }, { label: '空房', value: 2, color: '#dfe7ee' }, { label: '预退房', value: 1, color: '#f5ba35' }],
-      rooms: Array.from({ length: 18 }, (_, i) => ({ no: `${3 + Math.floor(i / 6)}0${i % 6 + 1}`, status: ['occupied', 'occupied', 'reserved', 'cleaning', 'empty'][i % 5], label: ['在住', '在住', '预订', '待清洁', '空闲'][i % 5] })),
-      todos: [{ label: '收款审批', note: '合同及卡项收款', value: 748, icon: 'el-icon-bank-card', color: '#B8945A', soft: '#FBF3E5' }, { label: '退款审批', note: '客户退款申请', value: 2, icon: 'el-icon-refresh-left', color: '#f5ba35', soft: '#fff8e6' }, { label: '采购单审批', note: '仓库采购计划', value: 0, icon: 'el-icon-shopping-cart-full', color: '#4f8cf7', soft: '#edf4ff' }, { label: '行政 OA 审批', note: '请假、用车及报修', value: 0, icon: 'el-icon-office-building', color: '#45b8ac', soft: '#eaf9f7' }],
-      warnings: [
-        { title: '客户预警', total: 24, icon: 'el-icon-user-solid', color: '#45b8ac', items: [{ name: '新增客资', value: 3 }, { name: '预产期提醒', value: 4 }, { name: '妈妈生日', value: 16 }, { name: '宝宝生日', value: 1 }] },
-        { title: '财务预警', total: 462, icon: 'el-icon-coin', color: '#dfaa27', items: [{ name: '合同欠款', value: 462 }, { name: '退款待审', value: 2 }, { name: '发票待开', value: 0 }] },
-        { title: '客房预警', total: 8, icon: 'el-icon-house', color: '#7e79df', items: [{ name: '待入住', value: 2 }, { name: '退房提醒', value: 1 }, { name: '客房服务', value: 3 }, { name: '客户外出', value: 2 }] },
-        { title: '服务预警', total: 272, icon: 'el-icon-first-aid-kit', color: '#B8945A', items: [{ name: '产康预约', value: 6 }, { name: '大于7天未耗卡', value: 266 }, { name: '查看医嘱', value: 0 }] }
-      ],
-      trendBars: [{ month: '1月', contract: 45, receipt: 35 }, { month: '2月', contract: 62, receipt: 50 }, { month: '3月', contract: 53, receipt: 58 }, { month: '4月', contract: 78, receipt: 61 }, { month: '5月', contract: 67, receipt: 64 }, { month: '6月', contract: 90, receipt: 73 }, { month: '7月', contract: 74, receipt: 69 }],
-      sources: [{ label: '朋友推荐', percent: 36, color: '#B8945A' }, { label: '线上咨询', percent: 28, color: '#4f8cf7' }, { label: '到店咨询', percent: 18, color: '#45b8ac' }, { label: '渠道合作', percent: 12, color: '#f5ba35' }, { label: '其他来源', percent: 6, color: '#9aa6b4' }]
+      // Keep the dashboard covered until the authorized store context and the
+      // first data snapshot are both ready; restricted accounts must never
+      // flash an all-store/zero-room state during login initialization.
+      loading: true,
+      storeId: String(this.$route.query.storeId || 'all'),
+      period: 'month',
+      updatedAt: '',
+      raw: {
+        stores: [],
+        overview: {},
+        customers: [],
+        contracts: [],
+        receipts: [],
+        rooms: [],
+        bookings: [],
+        appointments: []
+      }
+    }
+  },
+  computed: {
+    ...mapGetters(['roles', 'permissions', 'permission_routes', 'storeIds', 'currentStoreId']),
+    isSystemAdmin() {
+      return (this.roles || []).includes('SYS_ADMIN')
+    },
+    todayText() {
+      return localDate(new Date())
+    },
+    periodText() {
+      return {
+        today: '今天',
+        week: '近 7 天',
+        month: '本月',
+        quarter: '本季度',
+        year: '本年度'
+      }[this.period]
+    },
+    currentStore() {
+      return this.raw.stores.find(item => Number(item.id) === Number(this.storeId))
+    },
+    currentStoreName() {
+      return this.currentStore ? this.currentStore.name : '全部门店'
+    },
+    scopedCustomers() {
+      return this.filterStore(this.raw.customers)
+    },
+    scopedContracts() {
+      return this.filterStore(this.raw.contracts)
+    },
+    scopedReceipts() {
+      return this.filterStore(this.raw.receipts)
+    },
+    scopedRooms() {
+      return this.filterStore(this.raw.rooms)
+    },
+    scopedBookings() {
+      return this.filterStore(this.raw.bookings)
+    },
+    scopedAppointments() {
+      return this.filterStore(this.raw.appointments)
+    },
+    periodCustomers() {
+      return this.scopedCustomers.filter(item => this.inPeriod(item.created_at || item.createdAt))
+    },
+    periodContracts() {
+      return this.scopedContracts.filter(item => this.inPeriod(item.sign_date || item.signDate || item.created_at))
+    },
+    periodReceipts() {
+      return this.scopedReceipts.filter(item => item.status === '已审核' && this.inPeriod(item.received_at || item.receivedAt))
+    },
+    periodAppointments() {
+      return this.scopedAppointments.filter(item => this.inPeriod(item.appointmentDate || item.appointment_date))
+    },
+    occupiedRooms() {
+      return this.scopedRooms.filter(item => ['在住', '入住', '已入住'].includes(item.status)).length
+    },
+    reservedRooms() {
+      return this.scopedRooms.filter(item => ['已预订', '预约', '预订'].includes(item.status)).length
+    },
+    availableRooms() {
+      return this.scopedRooms.filter(item => ['空闲', '可用', '可售'].includes(item.status)).length
+    },
+    occupancyRate() {
+      return this.scopedRooms.length
+        ? ((this.occupiedRooms / this.scopedRooms.length) * 100).toFixed(1)
+        : '0.0'
+    },
+    auditedIncome() {
+      return this.periodReceipts.reduce((total, item) => total + numberValue(item.amount), 0)
+    },
+    pendingContracts() {
+      return this.scopedContracts.filter(item => ['已签合同但未审核', '待审核'].includes(item.status)).length
+    },
+    pendingReceipts() {
+      return this.scopedReceipts.filter(item => item.status === '待审核').length
+    },
+    outstandingContracts() {
+      return this.scopedContracts.filter(item => numberValue(item.outstanding_amount) > 0)
+    },
+    outstandingAmount() {
+      return this.outstandingContracts.reduce((total, item) => total + numberValue(item.outstanding_amount), 0)
+    },
+    waitingCheckIn() {
+      return this.scopedBookings.filter(item => ['已订房', '待入住'].includes(item.status)).length
+    },
+    currentStays() {
+      return this.scopedBookings.filter(item => item.status === '已入住').length
+    },
+    pendingAppointments() {
+      return this.scopedAppointments.filter(item => !['已完成', '已取消'].includes(item.serviceStatus || item.status)).length
+    },
+    dueSoonCustomers() {
+      const today = new Date()
+      const future = new Date(today)
+      future.setDate(today.getDate() + 30)
+      return this.scopedCustomers.filter(item => {
+        const key = dateKey(item.edc)
+        return key && key >= localDate(today) && key <= localDate(future)
+      }).length
+    },
+    kpis() {
+      return this.authorizedItems([
+        { label: '已审核收款（元）', prefix: '¥', value: this.money(this.auditedIncome), unit: '', note: `${this.pendingReceipts} 笔待审核`, icon: 'el-icon-wallet', color: 'pink', route: '/finance/item-1' },
+        { label: '新增客户数量', prefix: '', value: this.periodCustomers.length, unit: '人', note: `${this.dueSoonCustomers} 人临近预产期`, icon: 'el-icon-user-solid', color: 'blue', route: '/customer/item-1' },
+        { label: '当前入住客房', prefix: '', value: this.occupiedRooms, unit: '间', note: `入住率 ${this.occupancyRate}%`, icon: 'el-icon-house', color: 'orange', route: '/room/item-1' },
+        { label: '已签合同数', prefix: '', value: this.periodContracts.length, unit: '份', note: `${this.pendingContracts} 份待审核`, icon: 'el-icon-document-checked', color: 'green', route: '/sales/item-1' }
+      ])
+    },
+    roomStats() {
+      return this.authorizedItems([
+        { label: '房间总数', value: this.scopedRooms.length, tone: 'blue', route: '/room/item-1' },
+        { label: '入住人数', value: this.currentStays, tone: 'dark', route: '/room/item-1' },
+        { label: '空房数量', value: this.availableRooms, tone: 'green', route: '/room/item-1' },
+        { label: '入住率（%）', value: this.occupancyRate, tone: 'dark', route: '/room/item-1' },
+        { label: '已预订房', value: this.reservedRooms, tone: 'orange', route: '/room/item-1' },
+        { label: '待入住', value: this.waitingCheckIn, tone: 'pink', route: '/room/item-1' },
+        { label: '本期订房', value: this.scopedBookings.filter(item => this.inPeriod(item.check_in)).length, tone: 'blue', route: '/room/item-1' },
+        { label: '本期预约', value: this.periodAppointments.length, tone: 'purple', route: '/schedule/item-1' }
+      ])
+    },
+    todoItems() {
+      return this.authorizedItems([
+        { label: '合同审批', value: this.pendingContracts, route: '/approval/item-1' },
+        { label: '收款审批', value: this.pendingReceipts, route: '/finance/item-2' },
+        { label: '退款审批', value: 0, route: '/finance/item-3' },
+        { label: '服务预约待执行', value: this.pendingAppointments, route: '/schedule/item-1' },
+        { label: '待入住办理', value: this.waitingCheckIn, route: '/room/item-1' },
+        { label: '采购单审批', value: 0, route: '/warehouse/item-5' },
+        { label: '盘点处理', value: 0, route: '/warehouse/item-3' },
+        { label: '库存预警', value: 0, route: '/warehouse/item-4' },
+        { label: '客户欠款跟进', value: this.outstandingContracts.length, route: '/finance/item-2' }
+      ])
+    },
+    warningTotals() {
+      return {
+        customer: this.dueSoonCustomers + this.periodCustomers.length,
+        finance: this.pendingReceipts + this.outstandingContracts.length,
+        room: this.waitingCheckIn + this.reservedRooms,
+        service: this.pendingAppointments,
+        inventory: 0
+      }
+    },
+    trendRows() {
+      const result = []
+      for (let offset = 6; offset >= 0; offset -= 1) {
+        const day = new Date()
+        day.setDate(day.getDate() - offset)
+        const key = localDate(day)
+        result.push({
+          key,
+          label: `${day.getMonth() + 1}/${day.getDate()}`,
+          contract: this.scopedContracts
+            .filter(item => dateKey(item.sign_date || item.signDate || item.created_at) === key)
+            .reduce((total, item) => total + numberValue(item.amount), 0),
+          receipt: this.scopedReceipts
+            .filter(item => item.status === '已审核' && dateKey(item.received_at || item.receivedAt) === key)
+            .reduce((total, item) => total + numberValue(item.amount), 0)
+        })
+      }
+      return result
+    },
+    trendMax() {
+      return Math.max(1, ...this.trendRows.map(item => Math.max(item.contract, item.receipt)))
+    },
+    occupancyRingStyle() {
+      const rate = Math.max(0, Math.min(100, Number(this.occupancyRate)))
+      return { background: `conic-gradient(#31c69a 0 ${rate}%, #e9edf2 ${rate}% 100%)` }
+    },
+    roomVisuals() {
+      return this.authorizedItems([
+        { label: '在住', value: this.occupiedRooms, color: '#31c69a', route: '/room/item-1' },
+        { label: '已预订', value: this.reservedRooms, color: '#4a8ef7', route: '/room/item-1' },
+        { label: '空闲', value: this.availableRooms, color: '#b8c2cf', route: '/room/item-1' },
+        { label: '待入住', value: this.waitingCheckIn, color: '#f2a13a', route: '/room/item-1' }
+      ])
+    },
+    warningItems() {
+      return this.authorizedItems([
+        { label: '新增客户提醒', value: this.periodCustomers.length, unit: '人', tone: 'green', route: '/customer/item-1' },
+        { label: '预产期提醒', value: this.dueSoonCustomers, unit: '人', tone: 'green', route: '/customer/item-1' },
+        { label: '合同欠款客户', value: this.outstandingContracts.length, unit: '人', tone: 'orange', route: '/finance/item-2' },
+        { label: '合同未收金额', value: `¥${this.money(this.outstandingAmount)}`, unit: '', tone: 'orange', route: '/finance/item-2' },
+        { label: '待入住提醒', value: this.waitingCheckIn, unit: '人', tone: 'purple', route: '/room/item-1' },
+        { label: '已预订房间', value: this.reservedRooms, unit: '间', tone: 'purple', route: '/room/item-1' },
+        { label: '服务预约提醒', value: this.pendingAppointments, unit: '项', tone: 'pink', route: '/schedule/item-1' },
+        { label: '物料库存预警', value: 0, unit: '项', tone: 'red', route: '/warehouse/item-4' }
+      ])
+    }
+  },
+  watch: {
+    '$route.query.storeId'(storeId) {
+      const value = this.resolveAuthorizedStoreId(storeId)
+      if (value !== this.storeId) this.storeId = value
+      if (value !== String(this.currentStoreId || 'all')) {
+        this.$store.dispatch('app/setCurrentStore', value)
+      }
+    }
+  },
+  async created() {
+    try {
+      await this.initializeStoreContext()
+    } catch (error) {
+      // Store initialization must never leave the whole dashboard masked.
+      // loadData below can still show the data available to the current role.
+    }
+    await this.loadData()
+  },
+  methods: {
+    resolveAuthorizedStoreId(candidate) {
+      const allowedStoreIds = (this.storeIds || []).map(item => String(item))
+      const requested = String(candidate || '')
+      if (this.isSystemAdmin) return requested || String(this.currentStoreId || 'all')
+      if (requested && allowedStoreIds.includes(requested)) return requested
+      const current = String(this.currentStoreId || '')
+      if (current && allowedStoreIds.includes(current)) return current
+      return allowedStoreIds[0] || requested || 'all'
+    },
+    async initializeStoreContext() {
+      // Resolve the route, global navbar store and local dashboard store before
+      // the first request.  Restricted accounts previously rendered once with
+      // `all`, then switched to their only store after the navbar watcher ran.
+      const storeId = this.resolveAuthorizedStoreId(this.$route.query.storeId)
+      this.storeId = storeId
+      if (storeId !== String(this.currentStoreId || 'all')) {
+        await this.$store.dispatch('app/setCurrentStore', storeId)
+      }
+
+      if (String(this.$route.query.storeId || '') !== storeId) {
+        const query = { ...this.$route.query, storeId }
+        await this.$router.replace({ path: this.$route.path, query }).catch(() => {})
+      }
+      await this.$nextTick()
+    },
+    ensureAuthorizedStore() {
+      const storeId = this.resolveAuthorizedStoreId(this.storeId)
+      if (storeId === this.storeId && storeId === String(this.currentStoreId || 'all')) return
+      this.storeId = storeId
+      this.$store.dispatch('app/setCurrentStore', storeId)
+      const query = { ...this.$route.query, storeId }
+      this.$router.replace({ path: this.$route.path, query }).catch(() => {})
+    },
+    hasAnyPermission(required) {
+      if ((this.roles || []).includes('SYS_ADMIN')) return true
+      return required.some(item => (this.permissions || []).includes(item))
+    },
+    canAccessRoute(targetPath) {
+      if (!targetPath || targetPath === '/dashboard') return true
+      const normalize = value => `/${String(value || '').split('/').filter(Boolean).join('/')}`
+      const visit = (routes, parentPath = '') => routes.some(route => {
+        const currentPath = String(route.path || '').startsWith('/')
+          ? normalize(route.path)
+          : normalize(`${parentPath}/${route.path || ''}`)
+        if (currentPath === normalize(targetPath)) return true
+        return Array.isArray(route.children) && visit(route.children, currentPath)
+      })
+      return visit(this.permission_routes || [])
+    },
+    authorizedItems(items) {
+      return items.filter(item => this.canAccessRoute(item.route))
+    },
+    normalizeCustomerAppointment(row) {
+      const appointmentAt = row.appointmentAt || row.appointment_at || row.createdAt || ''
+      return {
+        ...row,
+        storeId: row.storeId || row.store_id,
+        appointmentDate: String(appointmentAt).slice(0, 10),
+        serviceStatus: row.serviceStatus || row.arrivalStatus || row.status || '待确认'
+      }
+    },
+    handleDashboardStoreChange(value) {
+      const store = this.raw.stores.find(item => Number(item.id) === Number(value))
+      this.$store.dispatch('app/setCurrentStore', String(value))
+      const query = { ...this.$route.query, storeId: String(value) }
+      if (store) query.store = store.name
+      else delete query.store
+      this.$router.replace({ path: this.$route.path, query }).catch(() => {})
+    },
+    async loadData() {
+      this.loading = true
+      try {
+        const silent = { silentError: true }
+        const canCustomer = this.hasAnyPermission(['CUSTOMER.VIEW', 'CUSTOMER.QUERY'])
+        const canSales = this.hasAnyPermission(['SALES.VIEW', 'SALES.QUERY'])
+        const canFinance = this.hasAnyPermission(['FINANCE.VIEW', 'FINANCE.QUERY'])
+        const canRoom = this.hasAnyPermission(['ROOM.VIEW', 'ROOM.QUERY'])
+        const canRecovery = this.hasAnyPermission(['RECOVERY.VIEW', 'RECOVERY.QUERY'])
+        const appointmentRequest = canRecovery
+          ? settle(getRehabModuleData('service-appointments', {}, silent), { list: [] })
+          : canCustomer
+            ? settle(getCustomerModuleData('appointments', {}, silent), { list: [] })
+            : Promise.resolve({ list: [] })
+        const [options, overview, customers, contracts, receipts, rooms, bookings, appointments] = await Promise.all([
+          settle(getMvpOptions(silent), { stores: [] }),
+          settle(getMvpOverview(silent), {}),
+          canCustomer ? settle(getMvpList('customers', silent), { list: [] }) : Promise.resolve({ list: [] }),
+          canSales ? settle(getMvpList('contracts', silent), { list: [] }) : Promise.resolve({ list: [] }),
+          canFinance ? settle(getMvpList('receipts', silent), { list: [] }) : Promise.resolve({ list: [] }),
+          canRoom ? settle(getMvpList('rooms', silent), { list: [] }) : Promise.resolve({ list: [] }),
+          canRoom ? settle(getMvpList('bookings', silent), { list: [] }) : Promise.resolve({ list: [] }),
+          appointmentRequest
+        ])
+        this.raw = {
+          stores: Array.isArray(options.stores) ? options.stores : [],
+          overview,
+          customers: rows(customers),
+          contracts: rows(contracts),
+          receipts: rows(receipts),
+          rooms: rows(rooms),
+          bookings: rows(bookings),
+          appointments: rows(appointments).map(this.normalizeCustomerAppointment)
+        }
+        this.ensureAuthorizedStore()
+        this.updatedAt = new Date().toLocaleString('zh-CN', { hour12: false })
+      } finally {
+        this.loading = false
+      }
+    },
+    filterStore(items) {
+      if (this.storeId === 'all') return items
+      return items.filter(item => {
+        const itemStoreId = Number(item.store_id || item.storeId || 0)
+        if (itemStoreId) return itemStoreId === Number(this.storeId)
+        return [item.store, item.store_name, item.storeName].includes(this.currentStoreName)
+      })
+    },
+    periodStart() {
+      const now = new Date()
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      if (this.period === 'week') start.setDate(start.getDate() - 6)
+      if (this.period === 'month') start.setDate(1)
+      if (this.period === 'quarter') start.setMonth(Math.floor(start.getMonth() / 3) * 3, 1)
+      if (this.period === 'year') start.setMonth(0, 1)
+      return localDate(start)
+    },
+    inPeriod(value) {
+      const key = dateKey(value)
+      return Boolean(key && key >= this.periodStart() && key <= this.todayText)
+    },
+    money(value) {
+      return numberValue(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+    },
+    shortMoney(value) {
+      const number = numberValue(value)
+      if (number >= 10000) return `${(number / 10000).toFixed(number % 10000 ? 1 : 0)}万`
+      return this.money(number)
+    },
+    trendHeight(value) {
+      if (!numberValue(value)) return '4px'
+      return `${Math.max(12, Math.round((numberValue(value) / this.trendMax) * 100))}%`
     }
   }
 }
 </script>
 
 <style lang="scss" scoped>
-.dashboard-page{min-height:calc(100vh - 84px);padding:24px;background:#f4f6f9;color:#263445}.welcome-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}.welcome-bar span{font-size:12px;color:#ff6f9c;font-weight:600}.welcome-bar h1{margin:5px 0;font-size:25px}.welcome-bar p{margin:0;color:#8a96a8;font-size:13px}.welcome-actions{display:flex;gap:8px}.summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px}.summary-card{display:flex;align-items:center;padding:20px;background:#fff;border-radius:10px;box-shadow:0 2px 12px rgba(27,45,75,.055)}.summary-icon{display:grid;place-items:center;width:52px;height:52px;border-radius:14px;margin-right:15px;font-size:23px}.summary-card>div:last-child{display:flex;flex-direction:column}.summary-card span{color:#7c8898;font-size:13px}.summary-card b{font-size:25px;margin:5px 0;color:#263445}.summary-card b small{font-size:12px;margin-left:4px;color:#8d98a8}.summary-card em{font-style:normal;font-size:11px}.summary-card em.up{color:#32af7c}.summary-card em.down{color:#e86b6b}.panel{border:0;border-radius:10px;margin-bottom:16px;box-shadow:0 2px 12px rgba(27,45,75,.055)}.panel-head{display:flex;align-items:center;justify-content:space-between}.panel-head>div:first-child{display:flex;flex-direction:column;gap:4px}.panel-head b{color:#263445}.panel-head span{font-size:11px;color:#9ba5b2}.panel-head a{font-size:12px;color:#ff6f9c}.occupancy-panel,.todo-panel{min-height:400px}.occupancy-top{display:flex;align-items:center;gap:32px}.rate-ring{width:126px;height:126px;padding:11px;border-radius:50%;background:conic-gradient(#45b8ac 0 58.3%,#edf1f5 58.3%)}.rate-ring>div{width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;background:#fff;border-radius:50%}.rate-ring b{font-size:23px}.rate-ring span{font-size:11px;color:#8d98a8}.room-stats{flex:1;display:grid;grid-template-columns:repeat(5,1fr)}.room-stats div{display:flex;flex-direction:column;align-items:center;border-left:1px solid #edf0f4}.room-stats i{width:9px;height:9px;border-radius:50%}.room-stats b{font-size:20px;margin:7px 0 3px}.room-stats span{font-size:11px;color:#8d98a8}.mini-room-grid{display:grid;grid-template-columns:repeat(9,1fr);gap:7px;margin-top:24px}.mini-room{padding:8px 4px;text-align:center;border-radius:6px;background:#f4f6f8;border-top:3px solid #dfe7ee}.mini-room b,.mini-room span{display:block}.mini-room b{font-size:12px}.mini-room span{font-size:9px;margin-top:4px;color:#8591a1}.mini-room.occupied{border-color:#45b8ac;background:#effaf8}.mini-room.reserved{border-color:#6f8ff7;background:#f2f4ff}.mini-room.cleaning{border-color:#f5ba35;background:#fff9eb}.todo-row{display:flex;align-items:center;padding:12px 0;border-bottom:1px solid #f0f2f5}.todo-icon{width:38px;height:38px;display:grid;place-items:center;border-radius:10px;margin-right:12px}.todo-row>div{flex:1;display:flex;flex-direction:column;gap:3px}.todo-row>div b{font-size:13px}.todo-row>div span{font-size:11px;color:#97a1af}.todo-row em{font-style:normal;font-weight:700;color:#ff6f9c}.all-todo{width:100%;margin-top:14px}.legend{display:flex!important;flex-direction:row!important;gap:14px!important}.legend i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px}.legend i.high{background:#ff6f9c}.legend i.normal{background:#45b8ac}.warning-groups{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.warning-group{padding:16px;border:1px solid #edf0f4;border-radius:8px}.warning-title{display:flex;align-items:center;gap:8px;padding-bottom:13px;border-bottom:1px solid #f0f2f5}.warning-title span{flex:1;font-weight:600}.warning-items>div{display:flex;justify-content:space-between;padding-top:12px;font-size:12px;color:#788596}.warning-items b{color:#37455a}.trend-panel,.source-panel{min-height:390px}.trend-chart{height:280px;padding:20px 18px 25px 52px;display:flex;gap:18px;align-items:flex-end;position:relative;background:repeating-linear-gradient(to top,#f0f2f5 0,#f0f2f5 1px,transparent 1px,transparent 70px)}.chart-labels{position:absolute;left:8px;top:13px;bottom:20px;display:flex;flex-direction:column;justify-content:space-between;color:#a4aeba;font-size:10px}.trend-bar{flex:1;height:100%;display:flex;justify-content:flex-end;align-items:center;flex-direction:column}.bar-pair{height:92%;display:flex;align-items:flex-end;gap:5px}.bar-pair i{width:16px;background:linear-gradient(to top,#ff6f9c,#ffabc5);border-radius:4px 4px 0 0}.bar-pair i+ i{background:linear-gradient(to top,#4f8cf7,#9ebcff)}.trend-bar>span{margin-top:7px;color:#8a96a6;font-size:10px}.source-row{display:grid;grid-template-columns:78px 1fr 38px;align-items:center;gap:10px;padding:15px 0;font-size:12px}.source-row>span{color:#6f7b8b}.source-row>div{height:8px;background:#eef1f4;border-radius:4px;overflow:hidden}.source-row i{display:block;height:100%;border-radius:4px}.source-row b{text-align:right}.dashboard-footer{text-align:center;color:#9aa5b3;font-size:11px;padding:14px}.dashboard-footer span{margin-left:18px}@media(max-width:1100px){.summary-grid{grid-template-columns:repeat(2,1fr)}.warning-groups{grid-template-columns:repeat(2,1fr)}.mini-room-grid{grid-template-columns:repeat(6,1fr)}}@media(max-width:768px){.dashboard-page{padding:14px}.welcome-actions{display:none}.summary-grid{grid-template-columns:1fr}.warning-groups{grid-template-columns:1fr}.occupancy-top{align-items:flex-start}.room-stats{grid-template-columns:repeat(3,1fr);gap:10px}.mini-room-grid{grid-template-columns:repeat(3,1fr)}}
+.dashboard-page {
+  min-height: calc(100vh - 84px);
+  padding: 20px 22px;
+  color: #303846;
+  background: #f4f1eb;
+}
+.dashboard-section {
+  margin-bottom: 16px;
+  padding: 20px;
+  border-radius: 10px;
+  border: 1px solid #e7dfd2;
+  background: #fffdf9;
+  box-shadow: 0 10px 28px -24px rgba(74, 55, 26, .42);
+}
+.dashboard-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.section-title { display: flex; align-items: center; }
+.section-title > i {
+  display: block;
+  width: 5px;
+  height: 26px;
+  margin-right: 9px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #d6bb85, #8c6a36);
+}
+.section-title h1, .section-title h2 { margin: 0; color: #202734; font-size: 19px; }
+.section-title h1 { font-size: 26px; }
+.section-title p { margin: 4px 0 0; color: #8b96a5; font-size: 13px; }
+.section-title.compact > i { height: 20px; }
+.section-title.compact h2 { font-size: 18px; }
+.toolbar-actions { display: flex; align-items: center; gap: 9px; }
+.toolbar-actions .el-select { width: 180px; }
+.toolbar-actions ::v-deep .el-input__inner,
+.toolbar-actions ::v-deep .el-radio-button__inner,
+.toolbar-actions .el-button { font-size: 13px; }
+.kpi-grid {
+  display: grid;
+  margin-bottom: 16px;
+  gap: 16px;
+  grid-template-columns: repeat(4, 1fr);
+}
+.kpi-card {
+  position: relative;
+  overflow: hidden;
+  min-height: 156px;
+  padding: 24px 90px 20px 24px;
+  border-radius: 10px;
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(35, 48, 67, .14);
+  transition: transform .2s, box-shadow .2s;
+}
+.kpi-card:hover { transform: translateY(-3px); box-shadow: 0 14px 30px rgba(74, 55, 26, .22); }
+.kpi-card.pink { background: linear-gradient(135deg, #d7bd87 0%, #b8945a 52%, #80602f 100%); }
+.kpi-card.blue { background: linear-gradient(135deg, #332e27 0%, #5f5547 56%, #85745c 100%); }
+.kpi-card.orange { background: linear-gradient(135deg, #9c642f 0%, #b97a3e 52%, #d29b61 100%); }
+.kpi-card.green { background: linear-gradient(135deg, #1f5b53 0%, #28766b 54%, #3f9588 100%); }
+.kpi-card,
+.kpi-card span,
+.kpi-card b,
+.kpi-card small,
+.kpi-card em,
+.kpi-card > i { color: #fff !important; }
+.kpi-card span { display: block; font-size: 15px; font-weight: 600; }
+.kpi-card b { display: block; margin: 24px 0 6px; font-size: 34px; line-height: 1; }
+.kpi-card b small { margin-left: 5px; font-size: 13px; }
+.kpi-card em { font-size: 12px; font-style: normal; opacity: .94; }
+.kpi-card > i { position: absolute; top: 51px; right: 30px; font-size: 52px; opacity: .85; }
+.stat-strip { display: grid; padding: 20px 8px; grid-template-columns: repeat(8, 1fr); }
+.stat-strip a {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border-right: 1px solid #e4e7eb;
+  flex-direction: column;
+  gap: 11px;
+}
+.stat-strip a:last-child { border-right: 0; }
+.stat-strip span { color: #4d5868; font-size: 13px; font-weight: 600; }
+.stat-strip b { font-size: 25px; }
+.stat-strip b.blue, .warning-grid b.blue { color: #8c6a36; }
+.stat-strip b.green, .warning-grid b.green { color: #26b98b; }
+.stat-strip b.pink, .warning-grid b.pink { color: #b8945a; }
+.stat-strip b.orange, .warning-grid b.orange { color: #ed9a2d; }
+.stat-strip b.purple, .warning-grid b.purple { color: #80602f; }
+.stat-strip b.red, .warning-grid b.red { color: #e55c63; }
+.stat-strip b.dark, .warning-grid b.dark { color: #222b37; }
+.visual-row { margin-bottom: 0; }
+.trend-panel, .room-visual-panel { min-height: 350px; }
+.trend-panel .section-title { position: relative; }
+.chart-legend { display: flex; margin-left: auto; gap: 18px; }
+.chart-legend span { color: #6f7b8b; font-size: 12px; }
+.chart-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; border-radius: 2px; }
+.chart-legend i.contract { background: #b8945a; }
+.chart-legend i.receipt { background: #28766b; }
+.trend-chart {
+  display: grid;
+  align-items: end;
+  height: 260px;
+  margin-top: 18px;
+  padding: 18px 18px 6px;
+  gap: 20px;
+  border-radius: 8px;
+  background: repeating-linear-gradient(to top, #eee7da 0, #eee7da 1px, transparent 1px, transparent 64px);
+  grid-template-columns: repeat(7, 1fr);
+}
+.trend-column { display: flex; align-items: center; height: 100%; flex-direction: column; justify-content: flex-end; }
+.bar-area { display: flex; align-items: flex-end; justify-content: center; width: 100%; height: 210px; gap: 7px; }
+.bar-area > i { position: relative; width: 23px; min-height: 4px; border-radius: 5px 5px 0 0; }
+.bar-area > i em {
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  color: #667384;
+  font-size: 10px;
+  font-style: normal;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+.contract-bar { background: linear-gradient(to top, #8c6a36, #d9bf8b); }
+.receipt-bar { background: linear-gradient(to top, #1f5b53, #5aa89b); }
+.trend-column > span { margin-top: 9px; color: #667384; font-size: 12px; font-weight: 600; }
+.room-visual-content { display: flex; align-items: center; justify-content: space-around; min-height: 270px; padding-top: 15px; }
+.occupancy-ring {
+  width: 174px;
+  height: 174px;
+  padding: 14px;
+  border-radius: 50%;
+  box-shadow: 0 10px 28px rgba(49, 198, 154, .18);
+}
+.occupancy-ring > div {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: #fff;
+  flex-direction: column;
+}
+.occupancy-ring b { color: #273343; font-size: 32px; }
+.occupancy-ring span { margin-top: 4px; color: #8994a3; font-size: 13px; }
+.room-legend { width: 42%; }
+.room-legend a { display: flex; align-items: center; padding: 14px 0; border-bottom: 1px solid #edf0f4; }
+.room-legend span { flex: 1; color: #5c6878; font-size: 13px; }
+.room-legend span i { display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 50%; }
+.room-legend b { color: #273343; font-size: 20px; }
+.process-panel, .notice-panel { min-height: 300px; }
+.process-grid { display: grid; margin-top: 14px; gap: 8px 12px; grid-template-columns: repeat(3, 1fr); }
+.process-grid a {
+  display: flex;
+  align-items: center;
+  min-height: 50px;
+  padding: 0 14px;
+  border-left: 3px solid #b8945a;
+  color: #374151;
+  background: #fbf8f1;
+  font-size: 14px;
+  font-weight: 600;
+}
+.process-grid a:nth-child(3n+2) { border-color: #35bfa0; background: #f0faf7; }
+.process-grid a:nth-child(3n) { border-color: #f4b149; background: #fff8ed; }
+.process-grid span { flex: 1; }
+.process-grid b {
+  min-width: 28px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  color: #fff;
+  background: #f39a32;
+  text-align: center;
+}
+.process-grid i { margin-left: 7px; color: #aab3c0; }
+.notice-panel .section-title a { margin-left: auto; color: #8c6a36; font-size: 13px; }
+.notice-row { display: flex; align-items: center; padding: 22px 4px; border-bottom: 1px solid #edf0f3; font-size: 13px; }
+.notice-row span { flex: 1; }
+.notice-row time { color: #8994a3; font-size: 11px; }
+.warning-panel { min-height: 265px; }
+.warning-panel .section-title > div { display: flex; align-items: baseline; gap: 8px; }
+.warning-panel .section-title p { margin: 0; }
+.warning-summary {
+  display: grid;
+  margin: 14px 0 0;
+  border-bottom: 3px solid #37caaa;
+  grid-template-columns: repeat(5, 1fr);
+}
+.warning-summary span { padding: 11px 12px; color: #526070; font-size: 13px; font-weight: 600; }
+.warning-summary span:nth-child(2) { border-color: #e8a632; }
+.warning-summary b { margin-left: 4px; font-size: 17px; }
+.warning-grid {
+  display: grid;
+  padding: 6px 0 3px;
+  background: #fbf8f1;
+  grid-template-columns: repeat(8, 1fr);
+}
+.warning-grid a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 104px;
+  border-right: 1px solid #e8ebef;
+  flex-direction: column;
+  gap: 7px;
+}
+.warning-grid a:last-child { border-right: 0; }
+.warning-grid span { color: #697586; font-size: 12px; font-weight: 600; }
+.warning-grid b { font-size: 23px; }
+.warning-grid small { color: #8f99a6; font-size: 11px; }
+footer { display: flex; justify-content: space-between; padding: 7px 3px; color: #7f8a99; font-size: 12px; }
+@media (max-width: 1200px) {
+  .dashboard-toolbar { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .toolbar-actions { width: 100%; flex-wrap: wrap; }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .stat-strip { grid-template-columns: repeat(4, 1fr); }
+  .stat-strip a { margin: 8px 0; }
+  .warning-grid { grid-template-columns: repeat(4, 1fr); }
+  .warning-grid a { border-bottom: 1px solid #e8ebef; }
+  .trend-chart { gap: 8px; }
+  .bar-area > i { width: 16px; }
+}
+@media (max-width: 768px) {
+  .dashboard-page { padding: 10px; }
+  .toolbar-actions .el-radio-group { display: none; }
+  .kpi-grid { grid-template-columns: 1fr; }
+  .stat-strip { grid-template-columns: repeat(2, 1fr); }
+  .process-grid { grid-template-columns: 1fr; }
+  .warning-summary { grid-template-columns: 1fr; }
+  .warning-grid { grid-template-columns: repeat(2, 1fr); }
+  .trend-chart { height: 220px; padding-right: 4px; padding-left: 4px; gap: 3px; }
+  .bar-area { height: 170px; gap: 2px; }
+  .bar-area > i { width: 9px; }
+  .bar-area > i em { display: none; }
+  .room-visual-content { flex-direction: column; gap: 18px; }
+  .room-legend { width: 100%; }
+  footer { align-items: center; flex-direction: column; gap: 4px; }
+}
 </style>

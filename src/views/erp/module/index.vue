@@ -8,7 +8,7 @@
       </div>
       <div class="heading-actions">
         <el-button icon="el-icon-refresh" @click="refreshPage">刷新</el-button>
-        <el-button type="primary" icon="el-icon-plus" @click="dialogVisible = true">新增{{ shortTitle }}</el-button>
+        <el-button type="primary" icon="el-icon-plus" @click="handleAdd">新增{{ shortTitle }}</el-button>
       </div>
     </div>
 
@@ -21,7 +21,7 @@
         </div>
       </div>
       <el-card shadow="never" class="content-card pipeline-card">
-        <div slot="header" class="card-title"><span>客户转化漏斗</span><el-tag size="small">本月</el-tag></div>
+        <div slot="header" class="card-title"><span>客户转化漏斗</span><el-tag size="small">当前</el-tag></div>
         <div class="pipeline">
           <div v-for="(stage, index) in pipeline" :key="stage.name" class="pipeline-step">
             <div class="pipeline-index">{{ index + 1 }}</div>
@@ -36,11 +36,50 @@
             <div class="chain-top"><i>{{ index + 1 }}</i><span>{{ stage.label }}</span><el-tag size="mini" :type="index < 2 ? 'success' : 'warning'">{{ stage.status }}</el-tag></div>
             <b>{{ stage.code }}</b>
             <small>{{ stage.required.slice(0, 3).join(' · ') }}</small>
-            <code>{{ stage.api }}</code>
           </div>
         </div>
       </el-card>
-      <record-table title="今日重点客户" :rows="customerRows" :columns="customerColumns" @action="openRecord" />
+      <el-card shadow="never" class="content-card customer-record-card">
+        <div slot="header" class="customer-record-header">
+          <div class="customer-record-title">
+            <b>客户档案</b>
+            <span>全部客户，保存后自动入档</span>
+          </div>
+          <div class="customer-record-actions">
+            <el-input v-model.trim="customerKeyword" size="small" clearable prefix-icon="el-icon-search" placeholder="搜索姓名、电话、来源或业务员" />
+            <el-select v-model="customerStatusFilter" size="small" clearable placeholder="全部客户状态">
+              <el-option v-for="status in customerStatusFilters" :key="status" :label="status" :value="status" />
+            </el-select>
+            <el-button size="small" icon="el-icon-download" @click="exportCustomers">导出</el-button>
+          </div>
+        </div>
+        <el-table :data="visibleCustomerRows" stripe class="customer-record-table">
+          <el-table-column type="index" label="#" width="52" />
+          <el-table-column v-for="column in customerColumns" :key="column.prop" :prop="column.prop" :label="column.label" :min-width="column.width || 110">
+            <template slot-scope="scope">
+              <el-tag v-if="column.tag" :type="scope.row[column.prop] === '同意签合同' ? 'success' : scope.row[column.prop] === '意向A' ? 'warning' : ''" size="mini">{{ scope.row[column.prop] }}</el-tag>
+              <span v-else>{{ scope.row[column.prop] }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="150" fixed="right">
+            <template slot-scope="scope">
+              <el-button type="text" size="mini" @click="openRecord(scope.row)">查看</el-button>
+              <el-button type="text" size="mini" @click="openRecord(scope.row)">编辑</el-button>
+              <el-dropdown>
+                <span class="more-link">更多<i class="el-icon-arrow-down" /></span>
+                <el-dropdown-menu slot="dropdown">
+                  <el-dropdown-item>打印</el-dropdown-item>
+                  <el-dropdown-item>查看日志</el-dropdown-item>
+                </el-dropdown-menu>
+              </el-dropdown>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="table-footer customer-record-footer">
+          <span>共 {{ visibleCustomerRows.length }} 条记录</span>
+          <span v-if="customerKeyword || customerStatusFilter">当前为筛选结果</span>
+        </div>
+      </el-card>
     </template>
 
     <template v-else-if="pageType === 'room-map'">
@@ -139,10 +178,24 @@
 
 <script>
 import { primaryBusinessChain } from '@/config/erp-workflows'
+import { getCustomerModuleData } from '@/api/erp-customer'
+
+const localCustomerSourceReplacements = {
+  '客户中心测试-王女士': '抖音咨询',
+  '客户中心测试-张女士': '客户介绍',
+  '客户中心测试-李女士': '自然上门'
+}
 
 const RecordTable = {
-  props: { title: String, rows: Array, columns: Array },
-  template: `<el-card shadow="never" class="content-card table-card"><div slot="header" class="card-title"><span>{{ title }}</span><div><el-button size="mini" icon="el-icon-download">导出</el-button><el-button size="mini" type="primary" icon="el-icon-plus" @click="$emit('action', {})">新增</el-button></div></div><el-table :data="rows" stripe style="width:100%"><el-table-column type="index" label="#" width="52" /><el-table-column v-for="column in columns" :key="column.prop" :prop="column.prop" :label="column.label" :min-width="column.width || 110"><template slot-scope="scope"><el-tag v-if="column.tag" :type="scope.row[column.prop] === '已完成' ? 'success' : scope.row[column.prop] === '待审核' ? 'warning' : ''" size="mini">{{ scope.row[column.prop] }}</el-tag><span v-else>{{ scope.row[column.prop] }}</span></template></el-table-column><el-table-column label="操作" width="150" fixed="right"><template slot-scope="scope"><el-button type="text" size="mini" @click="$emit('action', scope.row)">查看</el-button><el-button type="text" size="mini" @click="$emit('action', scope.row)">编辑</el-button><el-dropdown><span class="more-link">更多<i class="el-icon-arrow-down" /></span><el-dropdown-menu slot="dropdown"><el-dropdown-item>打印</el-dropdown-item><el-dropdown-item>查看日志</el-dropdown-item></el-dropdown-menu></el-dropdown></template></el-table-column></el-table><div class="table-footer"><span>共 {{ rows.length * 8 }} 条记录</span><el-pagination background layout="prev, pager, next" :total="rows.length * 8" :page-size="rows.length" /></div></el-card>`
+  props: {
+    title: String,
+    subtitle: String,
+    rows: Array,
+    columns: Array,
+    showAdd: { type: Boolean, default: true },
+    showExport: { type: Boolean, default: true }
+  },
+  template: `<el-card shadow="never" class="content-card table-card"><div slot="header" class="card-title table-card-title"><span><b>{{ title }}</b><small v-if="subtitle">{{ subtitle }}</small></span><div><el-button v-if="showExport" size="mini" icon="el-icon-download" @click="$emit('export')">导出</el-button><el-button v-if="showAdd" size="mini" type="primary" icon="el-icon-plus" @click="$emit('add')">新增</el-button></div></div><slot name="toolbar" /><el-table :data="rows" stripe style="width:100%"><el-table-column type="index" label="#" width="52" /><el-table-column v-for="column in columns" :key="column.prop" :prop="column.prop" :label="column.label" :min-width="column.width || 110"><template slot-scope="scope"><el-tag v-if="column.tag" :type="scope.row[column.prop] === '同意签合同' ? 'success' : scope.row[column.prop] === '意向A' ? 'warning' : ''" size="mini">{{ scope.row[column.prop] }}</el-tag><span v-else>{{ scope.row[column.prop] }}</span></template></el-table-column><el-table-column label="操作" width="150" fixed="right"><template slot-scope="scope"><el-button type="text" size="mini" @click="$emit('action', scope.row)">查看</el-button><el-button type="text" size="mini" @click="$emit('action', scope.row)">编辑</el-button><el-dropdown><span class="more-link">更多<i class="el-icon-arrow-down" /></span><el-dropdown-menu slot="dropdown"><el-dropdown-item>打印</el-dropdown-item><el-dropdown-item>查看日志</el-dropdown-item></el-dropdown-menu></el-dropdown></template></el-table-column></el-table><div class="table-footer"><span>共 {{ rows.length }} 条记录</span></div></el-card>`
 }
 
 export default {
@@ -153,6 +206,10 @@ export default {
       filters: { keyword: '', status: '', store: '中心广场旗舰店', date: '2026-07-22', range: [], week: '' },
       chartMode: '趋势',
       dialogVisible: false,
+      customerRecords: [],
+      customerLoading: false,
+      customerKeyword: '',
+      customerStatusFilter: '',
       dialogForm: { code: 'ERP-20260722-001', name: '', owner: '当前用户', status: '进行中', remark: '' },
       businessForm: { name: '', mobile: '', source: '', dueDate: '', consultant: '', store: '', amount: '', payType: '', account: '', remark: '' }
     }
@@ -163,7 +220,10 @@ export default {
     groupKey() { return this.$route.meta.groupKey || '' },
     pageType() { return this.$route.meta.pageType || 'list' },
     primaryBusinessChain() { return primaryBusinessChain },
-    shortTitle() { return this.title.replace(/管理|列表|记录|报表/g, '') || '记录' },
+    shortTitle() {
+      if (this.pageType === 'customer-center') return '客户'
+      return this.title.replace(/管理|列表|记录|报表/g, '') || '记录'
+    },
     pageDescription() {
       const descriptions = { customer: '统一沉淀客户线索、跟进轨迹与签约状态', sales: '覆盖套餐、合同、商品与优惠的完整销售链路', finance: '贯通收款、退款、费用、发票与审核流程', room: '以房态为核心协调预订、入住与客房服务', nursing: '围绕母婴档案执行护理计划与健康评估', recovery: '管理产后康复预约、排班、执行与耗卡', matron: '管理月嫂档案、档期、派工、合同与结算', diet: '从营养方案到采购、制餐、送餐全程管理', warehouse: '连接采购、入库、领料、盘点与库存预警', report: '汇总经营关键指标，支持多维度查询与导出' }
       return descriptions[this.groupKey] || `维护${this.title}资料、状态及审批记录`
@@ -174,16 +234,52 @@ export default {
       return [...common, ...middle, { prop: 'owner', label: '负责人' }, { prop: 'date', label: '更新时间', width: 150 }, { prop: 'status', label: '状态', tag: true }]
     },
     genericRows() {
-      const names = ['示例业务 A', '示例业务 B', '示例业务 C', '示例业务 D', '示例业务 E', '示例业务 F', '示例业务 G', '示例业务 H']
+      const names = ['业务记录 01', '业务记录 02', '业务记录 03', '业务记录 04', '业务记录 05', '业务记录 06', '业务记录 07', '业务记录 08']
       return names.map((name, i) => ({ code: `${this.groupKey.toUpperCase() || 'ERP'}-${String(i + 1).padStart(4, '0')}`, name, type: this.title, owner: ['李顾问', '王主管', '张护士', '陈专员'][i % 4], date: `2026-07-${22 - i} 10:${String(i * 7).padStart(2, '0')}`, status: ['进行中', '待审核', '已完成'][i % 3], amount: `${(2680 + i * 760).toLocaleString()}.00`, quantity: 12 + i * 3 }))
     },
     formFields() {
       return [{ key: 'name', label: this.groupKey === 'finance' ? '客户名称' : '姓名/名称' }, { key: 'mobile', label: '联系电话' }, { key: 'source', label: '来源渠道' }, { key: 'dueDate', label: '预产日期' }, { key: 'consultant', label: '所属顾问' }, { key: 'store', label: '所属门店' }, { key: 'amount', label: '业务金额' }, { key: 'payType', label: '结算方式' }, { key: 'account', label: '资金账户' }]
     },
-    customerMetrics() { return [{ label: '今日新增客户', value: 3, note: '较昨日 +1', color: '#ff6f9c' }, { label: '本月有效线索', value: 42, note: '转化率 18.6%', color: '#4f8cf7' }, { label: '预约参观', value: 6, note: '今日待接待 2', color: '#f5ba35' }, { label: '已签合同', value: 8, note: '合同额 32.6 万', color: '#45b8ac' }] },
-    pipeline() { return [{ name: '新增客户', value: 32 }, { name: '意向客户', value: 24 }, { name: '同意签合同', value: 11 }, { name: '已签合同', value: 8 }, { name: '入住客户', value: 5 }, { name: '流失客户', value: 3 }] },
-    customerColumns() { return [{ prop: 'name', label: '客户姓名' }, { prop: 'mobile', label: '联系电话' }, { prop: 'source', label: '客户来源' }, { prop: 'consultant', label: '所属顾问' }, { prop: 'follow', label: '最近跟进', width: 150 }, { prop: 'status', label: '客户状态', tag: true }] },
-    customerRows() { return ['王女士', '李女士', '周女士', '陈女士', '赵女士'].map((name, i) => ({ name, mobile: `138****${String(2600 + i * 37).slice(-4)}`, source: ['朋友推荐', '线上咨询', '到店咨询'][i % 3], consultant: ['李顾问', '王顾问', '陈顾问'][i % 3], follow: `2026-07-${22 - i} 09:30`, status: ['进行中', '待审核', '已完成'][i % 3] })) },
+    customerMetrics() {
+      const today = this.formatDate(new Date())
+      const active = this.customerRecords.filter(item => !['流失客户', '散客客户'].includes(item.status))
+      return [
+        { label: '今日新增客户', value: this.customerRecords.filter(item => String(item.createdAt || '').startsWith(today)).length, note: '来自真实客户档案', color: '#B8945A' },
+        { label: '当前有效客户', value: active.length, note: '不含流失与散客', color: '#8C6A36' },
+        { label: '重点跟进', value: this.customerRows.length, note: '需优先联系', color: '#f5ba35' },
+        { label: '同意签合同', value: this.customerRecords.filter(item => item.status === '同意签合同').length, note: '进入合同签订流程', color: '#45b8ac' }
+      ]
+    },
+    pipeline() {
+      const count = statuses => this.customerRecords.filter(item => statuses.includes(item.status)).length
+      return [
+        { name: '客户总数', value: this.customerRecords.length },
+        { name: '高意向', value: count(['意向A', '意向B']) },
+        { name: '持续跟进', value: count(['意向C', '意向D', '意向E']) },
+        { name: '同意签合同', value: count(['同意签合同']) },
+        { name: '散客客户', value: count(['散客客户']) },
+        { name: '流失客户', value: count(['流失客户']) }
+      ]
+    },
+    customerColumns() { return [{ prop: 'name', label: '客户姓名', width: 150 }, { prop: 'mobile', label: '联系电话', width: 135 }, { prop: 'source', label: '客户来源', width: 120 }, { prop: 'consultant', label: '所属业务员', width: 150 }, { prop: 'createdAt', label: '录入时间', width: 150 }, { prop: 'status', label: '客户状态', width: 110, tag: true }] },
+    customerRows() {
+      const priority = { '同意签合同': 0, '意向A': 1, '意向B': 2, '意向C': 3, '意向D': 4, '意向E': 5, '散客客户': 6, '流失客户': 7 }
+      const rank = status => Object.prototype.hasOwnProperty.call(priority, status) ? priority[status] : 99
+      return [...this.customerRecords]
+        .sort((a, b) => rank(a.status) - rank(b.status) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+        .slice(0, 3)
+    },
+    customerStatusFilters() {
+      return ['意向A', '意向B', '意向C', '意向D', '意向E', '同意签合同', '散客客户', '流失客户']
+    },
+    visibleCustomerRows() {
+      const keyword = this.customerKeyword.toLowerCase()
+      return this.customerRecords.filter(item => {
+        const matchesStatus = !this.customerStatusFilter || item.status === this.customerStatusFilter
+        const searchable = [item.name, item.mobile, item.source, item.consultant].join(' ').toLowerCase()
+        return matchesStatus && (!keyword || searchable.includes(keyword))
+      })
+    },
     roomLegend() { return [{ label: '在住', count: 21, color: '#45b8ac' }, { label: '预订', count: 9, color: '#6f8ff7' }, { label: '待清洁', count: 3, color: '#f5ba35' }, { label: '空闲', count: 2, color: '#dfe7ee' }, { label: '维修', count: 1, color: '#ef6b6b' }] },
     roomFloors() {
       const states = ['occupied', 'reserved', 'cleaning', 'empty', 'occupied', 'occupied']
@@ -201,14 +297,72 @@ export default {
     reportRows() { return ['2026-07', '2026-06', '2026-05', '2026-04', '2026-03'].map((period, i) => ({ period, store: i % 2 ? '黄河路轻奢店' : '中心广场旗舰店', count: 42 - i * 3, amount: `¥ ${(23.4 - i * 1.7).toFixed(1)} 万`, rate: `${i % 2 ? '-' : '+'}${3 + i}.2%`, status: i ? '已完成' : '进行中' })) },
     menuTree() { return [{ id: 1, label: '客户管理', children: [{ id: 11, label: '客户中心' }, { id: 12, label: '客户录入' }, { id: 13, label: '线索管理' }] }, { id: 2, label: '销售管理', children: [{ id: 21, label: '合同管理' }, { id: 22, label: '套餐管理' }] }, { id: 3, label: '系统设置', children: [{ id: 31, label: '用户管理' }, { id: 32, label: '角色管理' }] }] }
   },
+  watch: {
+    '$route.fullPath'() {
+      if (this.pageType === 'customer-center') this.loadCustomerCenter()
+    }
+  },
+  created() {
+    if (this.pageType === 'customer-center') this.loadCustomerCenter()
+  },
   methods: {
+    formatDate(value) {
+      const date = new Date(value)
+      const pad = number => String(number).padStart(2, '0')
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    },
+    async loadCustomerCenter() {
+      this.customerLoading = true
+      try {
+        const response = await getCustomerModuleData('customers')
+        this.customerRecords = (response.data.list || []).map(item => ({
+          ...item,
+          source: item.source === '本地数据库测试'
+            ? (localCustomerSourceReplacements[item.name] || '客户介绍')
+            : item.source,
+          consultant: item.salesperson || '未分配',
+          createdAt: item.createdAt ? String(item.createdAt).slice(0, 16) : '—'
+        }))
+      } finally {
+        this.customerLoading = false
+      }
+    },
+    handleAdd() {
+      if (this.pageType === 'customer-center') {
+        this.$router.push('/customer/item-2')
+        return
+      }
+      this.dialogVisible = true
+    },
+    exportCustomers() {
+      if (!this.visibleCustomerRows.length) {
+        this.$message.warning('暂无可导出的客户数据')
+        return
+      }
+      const headers = this.customerColumns.map(column => column.label)
+      const escapeCell = value => `"${String(value === null || value === undefined ? '' : value).replace(/"/g, '""')}"`
+      const lines = [
+        headers.map(escapeCell).join(','),
+        ...this.visibleCustomerRows.map(row => this.customerColumns.map(column => escapeCell(row[column.prop])).join(','))
+      ]
+      const blob = new Blob([`\uFEFF${lines.join('\r\n')}`], { type: 'text/csv;charset=utf-8' })
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = `客户档案列表-${this.formatDate(new Date())}.csv`
+      link.click()
+      URL.revokeObjectURL(link.href)
+      this.$message.success(`已导出 ${this.visibleCustomerRows.length} 条客户数据`)
+    },
     search() { this.$message.success(`已更新${this.title}查询结果`) },
     resetFilters() { this.filters.keyword = ''; this.filters.status = ''; this.filters.range = [] },
-    refreshPage() { this.$message.success('数据已刷新') },
+    async refreshPage() {
+      if (this.pageType === 'customer-center') await this.loadCustomerCenter()
+      this.$message.success('数据已刷新')
+    },
     openRecord(row) { this.dialogForm = { ...this.dialogForm, ...row }; this.dialogVisible = true },
     openRoom(room) { this.dialogForm = { ...this.dialogForm, code: `ROOM-${room.no}`, name: `${room.no} 房`, status: room.label }; this.dialogVisible = true },
-    saveDialog() { this.dialogVisible = false; this.$message.success('保存成功（演示数据）') },
-    saveForm() { this.$message.success('已提交审核（演示流程）') }
+    saveDialog() { this.dialogVisible = false; this.$message.success('保存成功') },
+    saveForm() { this.$message.success('已提交审核') }
   }
 }
 </script>
@@ -218,34 +372,48 @@ export default {
 .page-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; }
 .page-heading h1 { margin:5px 0 7px; font-size:25px; color:#1f2d3d; }
 .page-heading p { margin:0; color:#8a96a8; font-size:13px; }
-.eyebrow { color:#ff6f9c; font-size:12px; font-weight:700; letter-spacing:1px; }
+.eyebrow { color:#8c6a36; font-size:12px; font-weight:700; letter-spacing:1px; }
 .heading-actions { display:flex; gap:8px; }
 .content-card { border:0; border-radius:10px; margin-bottom:16px; box-shadow:0 2px 12px rgba(27,45,75,.055); }
 .card-title { display:flex; align-items:center; justify-content:space-between; font-weight:700; color:#263445; }
-.card-title small { color:#9aa5b4; font-weight:400; }
-.metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; margin-bottom:16px; }
-.metric-card { position:relative; display:flex; align-items:center; min-height:104px; padding:20px 22px; background:#fff; border-radius:10px; box-shadow:0 2px 12px rgba(27,45,75,.055); overflow:hidden; }
+.card-title small { margin-left:10px; color:#9aa5b4; font-weight:400; }
+.metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:14px; }
+.metric-card { position:relative; display:grid; grid-template-columns:auto auto minmax(90px,1fr); align-items:center; min-height:88px; padding:15px 18px; background:#fff; border:1px solid #eee7da; border-radius:10px; box-shadow:0 2px 10px rgba(27,45,75,.045); overflow:hidden; }
 .metric-card:after { content:""; position:absolute; width:70px; height:70px; border-radius:50%; right:-24px; bottom:-30px; background:#f3f6f9; }
-.metric-dot { width:10px; height:44px; border-radius:5px; margin-right:16px; }
+.metric-dot { width:7px; height:38px; border-radius:5px; margin-right:14px; }
 .metric-card div { display:flex; flex-direction:column; }
-.metric-card b { font-size:28px; line-height:1.1; }
+.metric-card b { font-size:25px; line-height:1.1; }
 .metric-card span { color:#7b8797; font-size:13px; margin-top:5px; }
-.metric-card small { margin-left:auto; color:#9aa5b4; align-self:flex-end; }
+.metric-card small { margin-left:14px; color:#9aa5b4; justify-self:end; text-align:right; }
 .metric-icon { width:48px; height:48px; border-radius:12px; display:grid; place-items:center; margin-right:16px; font-size:22px; }
-.pipeline { display:flex; padding:8px 0 12px; }
+.pipeline { display:flex; padding:2px 10px 4px; }
 .pipeline-step { flex:1; min-width:100px; position:relative; display:flex; flex-direction:column; align-items:center; }
 .pipeline-step:not(:last-child):after { content:""; position:absolute; height:2px; top:17px; left:60%; right:-40%; background:#edf0f5; }
-.pipeline-index { z-index:1; width:34px; height:34px; display:grid; place-items:center; color:#fff; border-radius:50%; background:linear-gradient(135deg,#ff8bb0,#ff5f90); }
-.pipeline-step b { font-size:21px; margin:10px 0 4px; }.pipeline-step span { color:#7f8b9c; font-size:13px; }
-.business-chain { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; }.chain-stage { position:relative; padding:14px; border:1px solid #edf0f4; border-radius:8px; background:#fafbfd; }.chain-stage:not(:last-child):after { content:""; position:absolute; right:-9px; top:31px; width:8px; height:8px; border-top:2px solid #c9d1dc; border-right:2px solid #c9d1dc; transform:rotate(45deg); z-index:1; }.chain-top { display:flex; align-items:center; gap:7px; }.chain-top>i { display:grid; place-items:center; width:22px; height:22px; border-radius:50%; color:#fff; background:#ff6f9c; font-size:11px; font-style:normal; }.chain-top>span { flex:1; font-weight:700; }.chain-stage>b,.chain-stage>small,.chain-stage>code { display:block; }.chain-stage>b { margin:12px 0 6px; color:#425268; font-size:12px; }.chain-stage>small { min-height:32px; color:#8995a5; line-height:1.5; }.chain-stage>code { margin-top:8px; color:#7453d4; font-size:10px; }
+.pipeline-index { z-index:1; width:30px; height:30px; display:grid; place-items:center; color:#fff; border-radius:50%; background:linear-gradient(135deg,#d9bf8b,#8c6a36); box-shadow:0 8px 16px -12px rgba(111,84,43,.85); }
+.pipeline-step b { font-size:19px; margin:7px 0 3px; }.pipeline-step span { color:#7f8b9c; font-size:13px; }
+.business-chain { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; }.chain-stage { position:relative; padding:14px; border:1px solid #e7dfd2; border-radius:8px; background:#fffdf9; }.chain-stage:not(:last-child):after { content:""; position:absolute; right:-9px; top:31px; width:8px; height:8px; border-top:2px solid #c9aa70; border-right:2px solid #c9aa70; transform:rotate(45deg); z-index:1; }.chain-top { display:flex; align-items:center; gap:7px; }.chain-top>i { display:grid; place-items:center; width:22px; height:22px; border-radius:50%; color:#fff; background:#b8945a; font-size:11px; font-style:normal; }.chain-top>span { flex:1; font-weight:700; }.chain-stage>b,.chain-stage>small { display:block; }.chain-stage>b { margin:12px 0 6px; color:#425268; font-size:12px; }.chain-stage>small { min-height:32px; color:#8995a5; line-height:1.5; }
+.table-card-title>span { display:flex; align-items:baseline; gap:12px; }
+.table-card-title>span>b { font-size:15px; }
+.table-card-title small { margin-left:0; }
+.customer-record-card ::v-deep .el-card__header { padding:14px 18px; }
+.customer-record-card ::v-deep .el-card__body { padding:0; }
+.customer-record-header { display:flex; align-items:center; justify-content:space-between; gap:20px; }
+.customer-record-title { display:flex; align-items:baseline; gap:12px; min-width:240px; }
+.customer-record-title b { color:#263445; font-size:16px; }
+.customer-record-title span { color:#96a0ae; font-size:12px; }
+.customer-record-actions { display:flex; align-items:center; justify-content:flex-end; gap:9px; flex:1; }
+.customer-record-actions .el-input { width:min(360px,34vw); }
+.customer-record-actions .el-select { width:180px; }
+.customer-record-table { width:100%; }
+.customer-record-footer { padding:10px 18px; background:#fffdf9; }
 .filter-line,.room-legend,.meal-toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }.filter-line .el-input { width:240px; }.small-control { width:190px; }
 .room-legend { justify-content:space-between; }.legend-filters,.legend-items { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }.legend-items span { color:#6f7b8c; font-size:13px; }.legend-items i { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; }
 .room-layout { display:flex; flex-direction:column; gap:14px; }.floor-card { padding:18px; background:#fff; border-radius:10px; box-shadow:0 2px 12px rgba(27,45,75,.055); }.floor-title { display:flex; justify-content:space-between; margin-bottom:14px; }.floor-title b { font-size:16px; }.floor-title span { color:#9aa5b4; font-size:12px; }.room-grid { display:grid; grid-template-columns:repeat(8,minmax(105px,1fr)); gap:10px; }.room-card { padding:12px; min-height:88px; border-radius:8px; border-left:4px solid #dfe7ee; background:#f8fafc; cursor:pointer; transition:.2s; }.room-card:hover { transform:translateY(-2px); box-shadow:0 6px 18px rgba(27,45,75,.1); }.room-card div { display:flex; justify-content:space-between; }.room-card>span,.room-card>small { display:block; margin-top:9px; color:#778397; }.room-card>small { font-size:11px; }.room-occupied { border-color:#45b8ac; background:#f2fbf9; }.room-reserved { border-color:#6f8ff7; background:#f4f6ff; }.room-cleaning { border-color:#f5ba35; background:#fffaf0; }.room-empty { border-color:#dfe7ee; }.room-maintenance { border-color:#ef6b6b; }
-.schedule-card { min-height:440px; }.timeline-row { display:flex; gap:18px; padding:15px 0; border-bottom:1px solid #f0f2f5; }.timeline-row>b { color:#8d99a8; font-size:12px; }.timeline-row span { position:relative; color:#4b596c; }.timeline-row i { position:absolute; width:8px; height:8px; border-radius:50%; background:#ff6f9c; left:-13px; top:5px; }
-.week-tabs { display:grid; grid-template-columns:repeat(7,1fr); gap:8px; margin:18px 0; }.week-tabs button { padding:12px; border:1px solid #edf0f4; border-radius:8px; color:#7b8797; background:#fff; cursor:pointer; }.week-tabs button span,.week-tabs button b { display:block; }.week-tabs button b { margin-top:4px; }.week-tabs button.active { color:#fff; border-color:#ff6f9c; background:linear-gradient(135deg,#ff8bb0,#ff5f90); }.meal-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }.meal-column { padding:15px; background:#f8fafc; border-radius:9px; }.meal-column h3 { margin:0 0 14px; font-size:15px; }.meal-column h3 small { float:right; color:#99a4b2; }.dish-row { display:flex; align-items:center; gap:8px; padding:10px 0; border-top:1px solid #edf0f4; font-size:13px; }.dish-row span { flex:1; }
-.chart-card,.rank-card { min-height:410px; }.fake-chart { height:310px; display:flex; align-items:flex-end; gap:22px; padding:25px 20px 28px 55px; position:relative; background:repeating-linear-gradient(to top,#f1f3f6 0,#f1f3f6 1px,transparent 1px,transparent 62px); }.chart-axis { position:absolute; left:10px; top:15px; bottom:24px; display:flex; flex-direction:column; justify-content:space-between; color:#a1abba; font-size:11px; }.chart-bar { flex:1; height:100%; display:flex; align-items:center; justify-content:flex-end; flex-direction:column; }.chart-bar>div { width:58%; min-width:26px; background:linear-gradient(to top,#ff6f9c,#ffabc5); border-radius:7px 7px 0 0; position:relative; }.chart-bar>div span { position:absolute; top:-22px; left:50%; transform:translateX(-50%); white-space:nowrap; color:#5f6c7c; font-size:11px; }.chart-bar small { margin-top:9px; color:#7f8b9c; }.rank-row { display:flex; align-items:center; padding:16px 0; border-bottom:1px solid #f0f2f5; }.rank-row i { display:grid; place-items:center; width:25px; height:25px; border-radius:50%; background:#f2f4f7; color:#738096; font-style:normal; font-size:12px; }.rank-row:nth-child(-n+3) i { color:#fff; background:#ff6f9c; }.rank-row span { flex:1; margin-left:12px; color:#5e6b7b; }.rank-row b { color:#28384d; }
-.form-section { padding:4px 0 16px; }.form-section+ .form-section { border-top:1px solid #edf0f4; padding-top:18px; }.form-section h3 { margin:0 0 20px; font-size:15px; padding-left:10px; border-left:3px solid #ff6f9c; }.form-actions { text-align:center; padding-top:10px; }.tree-card { min-height:560px; }
+.schedule-card { min-height:440px; }.timeline-row { display:flex; gap:18px; padding:15px 0; border-bottom:1px solid #eee7da; }.timeline-row>b { color:#8d99a8; font-size:12px; }.timeline-row span { position:relative; color:#4b596c; }.timeline-row i { position:absolute; width:8px; height:8px; border-radius:50%; background:#b8945a; left:-13px; top:5px; }
+.week-tabs { display:grid; grid-template-columns:repeat(7,1fr); gap:8px; margin:18px 0; }.week-tabs button { padding:12px; border:1px solid #e7dfd2; border-radius:8px; color:#7b8797; background:#fffdf9; cursor:pointer; }.week-tabs button span,.week-tabs button b { display:block; }.week-tabs button b { margin-top:4px; }.week-tabs button.active { color:#fff; border-color:#b8945a; background:linear-gradient(135deg,#d9bf8b,#8c6a36); }.meal-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }.meal-column { padding:15px; background:#f8f6f1; border-radius:9px; }.meal-column h3 { margin:0 0 14px; font-size:15px; }.meal-column h3 small { float:right; color:#99a4b2; }.dish-row { display:flex; align-items:center; gap:8px; padding:10px 0; border-top:1px solid #e7dfd2; font-size:13px; }.dish-row span { flex:1; }
+.chart-card,.rank-card { min-height:410px; }.fake-chart { height:310px; display:flex; align-items:flex-end; gap:22px; padding:25px 20px 28px 55px; position:relative; background:repeating-linear-gradient(to top,#eee7da 0,#eee7da 1px,transparent 1px,transparent 62px); }.chart-axis { position:absolute; left:10px; top:15px; bottom:24px; display:flex; flex-direction:column; justify-content:space-between; color:#a1abba; font-size:11px; }.chart-bar { flex:1; height:100%; display:flex; align-items:center; justify-content:flex-end; flex-direction:column; }.chart-bar>div { width:58%; min-width:26px; background:linear-gradient(to top,#8c6a36,#d9bf8b); border-radius:7px 7px 0 0; position:relative; }.chart-bar>div span { position:absolute; top:-22px; left:50%; transform:translateX(-50%); white-space:nowrap; color:#5f6c7c; font-size:11px; }.chart-bar small { margin-top:9px; color:#7f8b9c; }.rank-row { display:flex; align-items:center; padding:16px 0; border-bottom:1px solid #eee7da; }.rank-row i { display:grid; place-items:center; width:25px; height:25px; border-radius:50%; background:#f6efdf; color:#8c6a36; font-style:normal; font-size:12px; }.rank-row:nth-child(-n+3) i { color:#fff; background:#b8945a; }.rank-row span { flex:1; margin-left:12px; color:#5e6b7b; }.rank-row b { color:#28384d; }
+.form-section { padding:4px 0 16px; }.form-section+ .form-section { border-top:1px solid #edf0f4; padding-top:18px; }.form-section h3 { margin:0 0 20px; font-size:15px; padding-left:10px; border-left:3px solid #b8945a; }.form-actions { text-align:center; padding-top:10px; }.tree-card { min-height:560px; }
 .table-footer { display:flex; justify-content:space-between; align-items:center; padding-top:18px; color:#8b96a6; font-size:12px; }.more-link { margin-left:10px; color:#409eff; font-size:12px; cursor:pointer; }
 @media (max-width:1200px){.room-grid{grid-template-columns:repeat(4,1fr)}.meal-grid{grid-template-columns:repeat(2,1fr)}.business-chain{grid-template-columns:repeat(3,1fr)}}
-@media (max-width:768px){.erp-page{padding:14px}.page-heading{align-items:flex-start;gap:14px}.heading-actions{display:none}.metric-grid{grid-template-columns:repeat(2,1fr)}.metric-card{padding:14px}.metric-card small{display:none}.pipeline{overflow:auto}.business-chain{grid-template-columns:1fr}.chain-stage:not(:last-child):after{display:none}.room-grid{grid-template-columns:repeat(2,1fr)}.meal-grid{grid-template-columns:1fr}.week-tabs{overflow:auto;grid-template-columns:repeat(7,90px)}.filter-line .el-input,.small-control{width:100%}}
+@media (max-width:768px){.erp-page{padding:14px}.page-heading{align-items:flex-start;gap:14px}.heading-actions{display:none}.metric-grid{grid-template-columns:repeat(2,1fr)}.metric-card{display:flex;padding:14px}.metric-card small{display:none}.pipeline{overflow:auto}.business-chain{grid-template-columns:1fr}.chain-stage:not(:last-child):after{display:none}.table-card-title>span{align-items:flex-start;flex-direction:column;gap:4px}.customer-record-header{align-items:stretch;flex-direction:column;gap:10px}.customer-record-title{min-width:0}.customer-record-actions{align-items:stretch;flex-direction:column}.customer-record-actions .el-input,.customer-record-actions .el-select{width:100%}.room-grid{grid-template-columns:repeat(2,1fr)}.meal-grid{grid-template-columns:1fr}.week-tabs{overflow:auto;grid-template-columns:repeat(7,90px)}.filter-line .el-input,.small-control{width:100%}}
 </style>

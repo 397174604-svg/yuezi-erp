@@ -9,6 +9,22 @@ export const countryCodeOptions = [
 
 export const legacyCustomerTags = ['重点关注', '有钱', '重男轻女', '新晋辣妈', '备孕']
 
+export const legacyCustomerSources = [
+  '客户介绍',
+  '住附近',
+  '电话来访',
+  '大众点评',
+  '美团咨询',
+  '地推拓客',
+  '抖音咨询',
+  '小红书咨询',
+  '自然上门',
+  '网络搜索',
+  '市场渠道',
+  '二胎入住',
+  '内部资源'
+]
+
 export const stores = ['中心广场旗舰店', '黄河路轻奢店']
 
 export const roomTypes = [
@@ -81,9 +97,9 @@ export function createEmptyCustomer(entryTime) {
     area: '',
     areaId: '',
     firstVisitAt: '',
-    trackerName: '管理员',
-    trackerId: 'U0001',
-    trackerDepartment: '管理部',
+    trackerName: '',
+    trackerId: '',
+    trackerDepartment: '',
     ethnicity: '',
     nativePlace: '',
     workUnit: '',

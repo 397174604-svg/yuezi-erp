@@ -2,580 +2,162 @@
   <div class="system-workbench">
     <section class="hero-panel">
       <div>
-        <div class="eyebrow"><i class="el-icon-setting" /> 系统设置 · 独立工作台草案</div>
+        <div class="eyebrow"><i class="el-icon-setting" /> 系统设置 · {{ pageConfig.featureId || '系统配置' }}</div>
         <h1>{{ pageTitle }}</h1>
-        <p>{{ config.description }}</p>
+        <p>{{ pageConfig.description }}</p>
       </div>
-      <div class="hero-status">
-        <el-tag type="success" effect="dark">页面身份已核验</el-tag>
-        <el-tag type="warning" effect="dark">内部字段待核验</el-tag>
-        <span>完成等级：{{ config.completionLevel }}</span>
-      </div>
-    </section>
-
-    <el-alert
-      :title="config.evidenceNote"
-      type="warning"
-      :closable="false"
-      show-icon
-      class="evidence-alert"
-    />
-
-    <section class="audit-grid">
-      <div class="audit-card">
-        <span>菜单覆盖</span>
-        <strong>{{ repositoryMenuCount }} / {{ expectedMenuCount }}</strong>
-        <small>20 个标题、URL、navid 已对应</small>
-      </div>
-      <div class="audit-card">
-        <span>原页面身份</span>
-        <strong>{{ config.originalNavid || '待核验' }}</strong>
-        <small>{{ config.originalUrl || '原始 URL 待核验' }}</small>
-      </div>
-      <div class="audit-card">
-        <span>结构字段草案</span>
-        <strong>{{ config.filters.length + config.columns.length + config.formFields.length }}</strong>
-        <small>标签、顺序、控件、默认值全部待核验</small>
-      </div>
-      <div class="audit-card">
-        <span>工具栏证据</span>
-        <strong>0</strong>
-        <small>未添加任何推断的原系统业务按钮</small>
+      <div class="hero-actions">
+        <el-tag type="success" effect="dark">{{ isSystemSettings ? '后台配置入口' : '权限控制已启用' }}</el-tag>
+        <template v-if="isSystemSettings">
+          <el-button type="primary" @click="goTo('/people/item-6')">员工账号</el-button>
+          <el-button @click="goTo('/people/item-7')">角色权限</el-button>
+        </template>
+        <el-button v-else type="primary" @click="openCreate">{{ pageConfig.primaryAction }}</el-button>
       </div>
     </section>
 
-    <el-card v-if="config.structure.length" shadow="never" class="content-card">
-      <div slot="header" class="card-heading">
-        <div>
-          <h2>页面结构假设 <el-tag size="mini" type="warning">待核验</el-tag></h2>
-          <p>原页面是否为树、列表、权限矩阵、编辑器或组合页尚未取得内部证据</p>
+    <template v-if="isSystemSettings">
+      <el-alert class="scope-alert" type="info" :closable="false" show-icon title="系统设置用于维护账号、角色权限、门店档案和基础资料。业务新增会自动继承顶部当前门店；选择“全部门店”时仅允许汇总查询。" />
+      <section class="settings-entry-grid">
+        <button v-for="entry in settingsEntries" :key="entry.title" type="button" class="settings-entry" @click="goTo(entry.path)">
+          <span class="settings-entry__icon"><i :class="entry.icon" /></span>
+          <span class="settings-entry__body"><b>{{ entry.title }}</b><small>{{ entry.description }}</small></span>
+          <i class="el-icon-arrow-right" />
+        </button>
+      </section>
+      <el-card shadow="never" class="content-card settings-guide-card">
+        <div slot="header" class="card-heading"><div><h2>后台配置使用顺序</h2><p>先维护人员与权限，再维护门店与基础资料；避免以无业务含义的参数干扰真实单据。</p></div><el-tag type="warning" effect="plain">管理员操作</el-tag></div>
+        <div class="settings-guide">
+          <div><span>1</span><b>员工账号</b><small>关联职员、默认门店和登录角色。</small></div>
+          <div><span>2</span><b>角色权限</b><small>配置菜单、操作和数据范围。</small></div>
+          <div><span>3</span><b>门店与渠道</b><small>维护门店档案、负责人及启停状态。</small></div>
+          <div><span>4</span><b>审批中心</b><small>查看合同、收款和业务审批待办。</small></div>
         </div>
-        <el-tag effect="plain">{{ config.mode }}</el-tag>
-      </div>
-      <div class="structure-list">
-        <span v-for="item in config.structure" :key="item"><i class="el-icon-folder-opened" />{{ item }}</span>
-      </div>
-    </el-card>
+      </el-card>
+      <el-collapse v-model="advancedPanels" class="advanced-settings">
+        <el-collapse-item title="高级系统参数（仅兼容已有配置）" name="advanced">
+          <p>时区、会员跨店查询和门店业务隔离由系统维护。非必要情况下无需新增参数；如需变更，请先确认影响门店和生效时间。</p>
+          <div class="advanced-rows"><el-tag>默认门店时区：Asia/Shanghai</el-tag><el-tag type="success">会员跨店查询：开启</el-tag><el-tag type="warning">门店业务隔离：强制</el-tag></div>
+        </el-collapse-item>
+      </el-collapse>
+    </template>
 
-    <el-card v-if="config.dependencies.length" shadow="never" class="content-card">
-      <div slot="header" class="card-heading">
-        <div>
-          <h2>依赖关系核验清单</h2>
-          <p>以下仅是二次审计要逐项验证的场景，不是已实现的原系统规则</p>
-        </div>
-      </div>
-      <div class="dependency-list">
-        <span v-for="item in config.dependencies" :key="item"><i class="el-icon-warning-outline" />{{ item }}</span>
-      </div>
-    </el-card>
+    <template v-else>
+    <el-alert class="scope-alert" type="info" :closable="false" show-icon :title="pageConfig.scopeHint" />
 
-    <el-card shadow="never" class="content-card filter-card">
+    <section class="metric-grid">
+      <div v-for="metric in pageConfig.metrics" :key="metric.label" class="metric-card"><span>{{ metric.label }}</span><strong>{{ metric.value }}</strong><small :class="metric.tone">{{ metric.note }}</small></div>
+    </section>
+
+    <el-card shadow="never" class="content-card">
       <div slot="header" class="card-heading">
-        <div>
-          <h2>查询区结构草案</h2>
-          <p>“本地筛选”和“清空草案条件”是调试操作，不是原 ERP 工具栏证据</p>
-        </div>
-        <div>
-          <el-button size="small" @click="resetFilters">清空草案条件</el-button>
-          <el-button size="small" type="primary" @click="runLocalFilter">本地筛选</el-button>
-        </div>
+        <div><h2>{{ pageConfig.sectionTitle }}</h2><p>{{ pageConfig.sectionHint }}</p></div>
+        <div class="heading-actions"><el-button size="small" @click="runSecondaryAction">{{ pageConfig.secondaryAction }}</el-button><el-button size="small" type="primary" @click="openCreate">{{ pageConfig.primaryAction }}</el-button></div>
       </div>
-      <el-form label-position="top" class="filter-form">
-        <el-row :gutter="16">
-          <el-col
-            v-for="item in config.filters"
-            :key="item.key"
-            :xl="6"
-            :lg="8"
-            :md="12"
-            :xs="24"
-          >
-            <el-form-item>
-              <template slot="label">
-                <span>{{ item.label }}</span>
-                <em>待核验</em>
-              </template>
-              <el-select
-                v-if="item.type === 'select'"
-                v-model="filters[item.key]"
-                clearable
-                placeholder="选项待原系统核验"
-                class="full-control"
-              >
-                <el-option
-                  v-for="option in item.options"
-                  :key="option"
-                  :label="option"
-                  :value="option"
-                  disabled
-                />
-              </el-select>
-              <el-date-picker
-                v-else-if="item.type === 'dateRange'"
-                v-model="filters[item.key]"
-                type="daterange"
-                value-format="yyyy-MM-dd"
-                range-separator="至"
-                start-placeholder="开始日期待核验"
-                end-placeholder="结束日期待核验"
-                class="full-control"
-              />
-              <el-date-picker
-                v-else-if="item.type === 'date'"
-                v-model="filters[item.key]"
-                type="date"
-                value-format="yyyy-MM-dd"
-                placeholder="日期默认值待核验"
-                class="full-control"
-              />
-              <el-cascader
-                v-else-if="item.type === 'tree'"
-                v-model="filters[item.key]"
-                :options="treeDraftOptions"
-                :props="{ checkStrictly: true }"
-                clearable
-                placeholder="层级节点待原系统核验"
-                class="full-control"
-              />
-              <el-input
-                v-else
-                v-model="filters[item.key]"
-                clearable
-                :placeholder="`${item.label}待原系统核验`"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
+      <el-form :inline="true" size="small" class="filter-form" @submit.native.prevent="applyFilters">
+        <el-form-item label="关键词"><el-input v-model="keyword" clearable placeholder="名称/编码" @keyup.enter.native="applyFilters" /></el-form-item>
+        <el-form-item label="状态"><el-select v-model="statusFilter" clearable placeholder="全部状态"><el-option v-for="status in pageConfig.statuses" :key="status" :label="status" :value="status" /></el-select></el-form-item>
+        <el-form-item><el-button type="primary" plain @click="applyFilters">查询</el-button><el-button @click="resetFilters">重置</el-button></el-form-item>
       </el-form>
-    </el-card>
-
-    <el-card shadow="never" class="content-card table-card">
-      <div slot="header" class="card-heading">
-        <div>
-          <h2>列表字段结构草案 <el-tag size="mini" type="info">脱敏演示</el-tag></h2>
-          <p>真实表头、顺序、格式、汇总、排序和行操作待原系统二次核验</p>
-        </div>
-        <span class="result-count">共 {{ filteredRows.length }} 条脱敏演示记录</span>
-      </div>
-      <el-table v-loading="loading" :data="filteredRows" border stripe>
-        <el-table-column type="index" label="演示序号" width="86" fixed="left" />
-        <el-table-column
-          v-for="item in config.columns"
-          :key="item.key"
-          :prop="item.key"
-          :min-width="item.width || 120"
-          show-overflow-tooltip
-        >
-          <template slot="header">
-            <span>{{ item.label }}</span>
-            <small class="header-unverified">待核验</small>
-          </template>
-          <template slot-scope="scope">
-            <el-tag v-if="item.format === 'status'" size="mini" type="info">{{ scope.row[item.key] }}</el-tag>
-            <span v-else>{{ scope.row[item.key] }}</span>
-          </template>
+      <el-table :data="filteredRows" border stripe size="small" class="data-table">
+        <el-table-column v-for="column in pageConfig.columns" :key="column.key" :prop="column.key" :label="column.label" :min-width="column.width || 120" show-overflow-tooltip>
+          <template slot-scope="scope"><el-tag v-if="column.format === 'status'" size="mini" :type="statusType(scope.row[column.key])">{{ scope.row[column.key] }}</el-tag><span v-else>{{ scope.row[column.key] }}</span></template>
+        </el-table-column>
+        <el-table-column fixed="right" label="操作" width="220">
+          <template slot-scope="scope"><el-button type="text" size="small" @click="openEdit(scope.row)">{{ pageConfig.editAction }}</el-button><el-button type="text" size="small" @click="handleRowAction(scope.row)">{{ pageConfig.rowAction }}</el-button><el-button type="text" size="small" @click="toggleRow(scope.row)">{{ pageConfig.toggleAction }}</el-button></template>
         </el-table-column>
       </el-table>
+      <div v-if="!filteredRows.length" class="empty-state">没有匹配记录，请调整查询条件。</div>
     </el-card>
 
-    <el-card shadow="never" class="content-card form-card">
-      <div slot="header" class="card-heading">
-        <div>
-          <h2>新增/编辑字段草案</h2>
-          <p>不提供保存、发布、启停、授权、执行或删除；必填、校验、控件与权限均待核验</p>
-        </div>
-        <el-tag type="warning" effect="plain">不可提交</el-tag>
-      </div>
-      <el-row :gutter="14">
-        <el-col v-for="field in config.formFields" :key="field.key" :xl="6" :lg="8" :md="12" :xs="24">
-          <div class="field-card">
-            <div>
-              <strong>{{ field.label }}</strong>
-              <span>{{ fieldTypeLabel(field.type) }}</span>
-            </div>
-            <el-tag size="mini" type="warning">待核验</el-tag>
-          </div>
-        </el-col>
-      </el-row>
+    <el-card shadow="never" class="workflow-card">
+      <div slot="header" class="card-heading"><div><h2>{{ pageConfig.workflowTitle }}</h2><p>{{ pageConfig.workflowHint }}</p></div><el-tag type="warning" effect="plain">业务闭环</el-tag></div>
+      <div class="workflow-steps"><div v-for="(step, index) in pageConfig.workflow" :key="step.title" class="workflow-step"><span>{{ index + 1 }}</span><div><strong>{{ step.title }}</strong><small>{{ step.detail }}</small></div></div></div>
     </el-card>
 
-    <el-card shadow="never" class="content-card gap-card">
-      <div slot="header" class="card-heading">
-        <div>
-          <h2>本页未核验项</h2>
-          <p>原系统审计时必须逐项关闭，不得跨页面复用推断</p>
-        </div>
-      </div>
-      <div class="gap-list">
-        <el-tag v-for="item in auditGaps" :key="item" type="warning" effect="plain">{{ item }}</el-tag>
-      </div>
-    </el-card>
+    <el-dialog :title="dialogTitle" :visible.sync="dialogVisible" width="640px" @closed="resetForm">
+      <el-form ref="systemForm" :model="form" :rules="rules" label-width="118px" size="small">
+        <el-form-item v-for="field in pageConfig.formFields" :key="field.key" :label="field.label" :prop="field.key">
+          <el-input v-if="field.type === 'input' || field.type === 'textarea'" v-model="form[field.key]" :type="field.type === 'textarea' ? 'textarea' : 'text'" :rows="field.type === 'textarea' ? 3 : 1" :placeholder="`请输入${field.label}`" />
+          <el-input-number v-else-if="field.type === 'number'" v-model="form[field.key]" :min="0" controls-position="right" />
+          <el-switch v-else-if="field.type === 'switch'" v-model="form[field.key]" active-text="启用" inactive-text="停用" />
+          <el-date-picker v-else-if="field.type === 'date'" v-model="form[field.key]" type="date" value-format="yyyy-MM-dd" placeholder="选择日期" />
+          <el-select v-else v-model="form[field.key]" class="full-control" :placeholder="`请选择${field.label}`"><el-option v-for="option in field.options || []" :key="option.value || option" :label="option.label || option" :value="option.value || option" /></el-select>
+        </el-form-item>
+      </el-form>
+      <span slot="footer"><el-button size="small" @click="dialogVisible = false">取消</el-button><el-button size="small" type="primary" @click="saveRecord">保存并生效</el-button></span>
+    </el-dialog>
+    </template>
   </div>
 </template>
 
 <script>
-import {
-  SYSTEM_EXPECTED_MENU_COUNT,
-  SYSTEM_REPOSITORY_MENU_COUNT,
-  getSystemPageConfig
-} from '@/config/system-pages'
-import { getSystemModuleData } from '@/api/erp-system'
+import { getSystemPageConfig } from '@/config/system-pages'
+
+const option = (value, label = value) => ({ value, label })
+const commonStores = [option('全部门店'), option('上海静安店'), option('杭州西湖店'), option('深圳南山店')]
+const selectField = (key, label, options) => ({ key, label, type: 'select', options })
+const inputField = (key, label, type = 'input') => ({ key, label, type })
+
+const pageOverrides = {
+  系统设置: {
+    featureId: 'F061', mode: 'settings', description: '集中维护租户、门店、权限和业务默认参数，修改需记录操作者并按生效范围发布。', scopeHint: '系统级参数由总部维护；门店级参数只能作用于选定门店，不会覆盖其他门店配置。', primaryAction: '新增参数', secondaryAction: '导出配置', editAction: '编辑', rowAction: '查看变更', toggleAction: '启用/停用', sectionTitle: '系统参数与生效范围', sectionHint: '每条参数明确数据类型、作用范围、当前值和最近变更。', statuses: ['启用', '停用', '待发布'], metrics: [{ label: '参数总数', value: '86', note: '全局+门店', tone: 'info' }, { label: '待发布', value: '4', note: '需管理员确认', tone: 'warn' }, { label: '本月变更', value: '18', note: '全量留痕', tone: 'good' }, { label: '异常配置', value: '0', note: '校验通过', tone: 'good' }], columns: [{ key: 'code', label: '参数编码', width: 140 }, { key: 'name', label: '参数名称', width: 180 }, { key: 'scope', label: '生效范围', width: 120 }, { key: 'value', label: '当前值', width: 150 }, { key: 'updatedBy', label: '更新人', width: 100 }, { key: 'updatedAt', label: '更新时间', width: 145 }, { key: 'status', label: '状态', format: 'status', width: 85 }], formFields: [inputField('code', '参数编码'), inputField('name', '参数名称'), selectField('scope', '生效范围', commonStores), inputField('value', '参数值'), selectField('status', '状态', [option('启用'), option('停用'), option('待发布')])], workflowTitle: '参数发布闭环', workflowHint: '保存后先校验数据类型和作用范围，再发布到对应门店。', workflow: [{ title: '配置参数', detail: '填写键值和生效范围' }, { title: '校验变更', detail: '检查冲突与权限' }, { title: '发布生效', detail: '写入版本并记录日志' }]
+  },
+  历史数据迁移工具: {
+    featureId: 'F079', mode: 'migration', description: '按批次导入历史会员、订单和资产索引，支持预检、失败重试与回滚标记。', scopeHint: '迁移任务由总部发起；目标门店和数据类型必须明确，原始数据只读留存。', primaryAction: '新建迁移批次', secondaryAction: '下载模板', editAction: '查看批次', rowAction: '预检/重试', toggleAction: '暂停/继续', sectionTitle: '迁移批次与校验结果', sectionHint: '批次按数据类型执行，预检通过后才能导入。', statuses: ['待预检', '导入中', '已完成', '有失败'], metrics: [{ label: '批次总数', value: '12', note: '今年累计', tone: 'info' }, { label: '待预检', value: '2', note: '不可直接导入', tone: 'warn' }, { label: '成功记录', value: '48,236', note: '已校验', tone: 'good' }, { label: '失败记录', value: '36', note: '待重试', tone: 'bad' }], columns: [{ key: 'batchNo', label: '批次号', width: 145 }, { key: 'dataType', label: '数据类型', width: 120 }, { key: 'targetStore', label: '目标门店', width: 130 }, { key: 'total', label: '总记录', width: 90 }, { key: 'success', label: '成功', width: 90 }, { key: 'failed', label: '失败', width: 90 }, { key: 'status', label: '批次状态', format: 'status', width: 90 }], formFields: [inputField('batchNo', '批次名称'), selectField('dataType', '数据类型', [option('会员主档'), option('历史订单'), option('资产余额')]), selectField('targetStore', '目标门店', commonStores), inputField('fileName', '导入文件')], workflowTitle: '迁移批次闭环', workflowHint: '预检、导入、失败重试和结果确认均在同一批次内完成。', workflow: [{ title: '上传预检', detail: '校验字段、编码和重复项' }, { title: '分批导入', detail: '失败记录隔离，不影响成功项' }, { title: '结果确认', detail: '下载结果并标记可回滚' }]
+  },
+  '品牌定制（Logo/主题色/专属域名）': {
+    featureId: 'F098', mode: 'branding', description: '管理品牌 Logo、主题色和专属域名，支持总部默认值与门店覆盖值分层生效。', scopeHint: '品牌配置按租户和门店范围生效；发布前提供预览，发布后保留版本和回滚入口。', primaryAction: '新建品牌版本', secondaryAction: '预览当前主题', editAction: '编辑版本', rowAction: '预览/发布', toggleAction: '发布/回滚', sectionTitle: '品牌版本与发布记录', sectionHint: '每个版本包含视觉资产、域名配置和适用范围。', statuses: ['草稿', '待发布', '已发布', '已回滚'], metrics: [{ label: '版本总数', value: '8', note: '可回滚', tone: 'info' }, { label: '待发布', value: '1', note: '需预览', tone: 'warn' }, { label: '生效门店', value: '6', note: '当前版本', tone: 'good' }, { label: '域名状态', value: '正常', note: '证书有效', tone: 'good' }], columns: [{ key: 'version', label: '版本号', width: 90 }, { key: 'themeName', label: '主题名称', width: 170 }, { key: 'scope', label: '适用范围', width: 130 }, { key: 'domain', label: '专属域名', width: 190 }, { key: 'publisher', label: '发布人', width: 100 }, { key: 'updatedAt', label: '更新时间', width: 145 }, { key: 'status', label: '发布状态', format: 'status', width: 90 }], formFields: [inputField('version', '版本名称'), inputField('themeName', '主题名称'), selectField('scope', '适用范围', commonStores), inputField('domain', '专属域名'), selectField('status', '发布状态', [option('草稿'), option('待发布')])], workflowTitle: '品牌发布闭环', workflowHint: '保存草稿后先预览，再发布到选定范围；新版本异常可回滚。', workflow: [{ title: '编辑主题', detail: 'Logo、颜色和域名配置' }, { title: '预览校验', detail: '检查桌面端与移动端效果' }, { title: '发布/回滚', detail: '按范围生效并保留版本' }]
+  }
+}
+
+// Product-menu titles remove parenthetical detail. Keep the enhanced brand
+// workbench reachable from both the registry title and its visible short title.
+pageOverrides.品牌定制 = pageOverrides['品牌定制（Logo/主题色/专属域名）']
 
 export default {
   name: 'SystemWorkbench',
-  data() {
-    return {
-      filters: {},
-      rows: [],
-      loading: false,
-      expectedMenuCount: SYSTEM_EXPECTED_MENU_COUNT,
-      repositoryMenuCount: SYSTEM_REPOSITORY_MENU_COUNT,
-      treeDraftOptions: [{
-        value: 'unverified-root',
-        label: '层级节点待原系统核验',
-        disabled: true
-      }],
-      auditGaps: [
-        '页面模式与区域顺序',
-        '查询字段与默认值',
-        '完整下拉选项顺序',
-        '树层级与选择规则',
-        '工具栏标签/顺序/位置',
-        '列表表头/格式/汇总',
-        '新增编辑表单与必填',
-        '权限隐藏与数据范围',
-        '状态机与审批流转',
-        '上传/导入/导出/打印',
-        '调度/消息/预警真实行为',
-        '真实后端持久化'
-      ]
-    }
-  },
+  data() { return { keyword: '', statusFilter: '', rows: [], dialogVisible: false, editingId: '', form: {}, rules: {}, advancedPanels: [] } },
   computed: {
-    pageTitle() {
-      return this.$route.meta.title
+    pageTitle() { return this.$route.meta.configTitle || this.$route.meta.title.replace(/\s*★$/, '') },
+    isSystemSettings() { return this.pageTitle === '系统设置' },
+    settingsEntries() {
+      return [
+        { title: '员工账号', description: '维护登录账号、职员、默认门店与状态', icon: 'el-icon-user-solid', path: '/people/item-6' },
+        { title: '角色权限', description: '配置菜单、按钮和数据范围', icon: 'el-icon-key', path: '/people/item-7' },
+        { title: '门店与渠道', description: '维护门店档案、负责人及启停状态', icon: 'el-icon-office-building', path: '/store/item-1' },
+        { title: '审批中心', description: '查看合同、收款和业务审批待办', icon: 'el-icon-document-checked', path: '/approval/item-1' }
+      ]
     },
-    config() {
-      return getSystemPageConfig(this.pageTitle)
-    },
-    filteredRows() {
-      const entries = Object.entries(this.filters).filter(([, value]) => {
-        return value !== '' && value !== null && (!Array.isArray(value) || value.length)
-      })
-      if (!entries.length) return this.rows
-      return this.rows.filter(row => entries.every(([key, value]) => {
-        if (Array.isArray(value)) return true
-        return String(row[key] || '').includes(String(value))
-      }))
-    }
+    pageConfig() { const base = getSystemPageConfig(this.pageTitle); return pageOverrides[this.pageTitle] || { ...base, featureId: 'SYS', scopeHint: '配置按权限范围生效，变更会记录操作日志。', primaryAction: '新增配置', secondaryAction: '导出', editAction: '编辑', rowAction: '查看详情', toggleAction: '启用/停用', sectionTitle: `${this.pageTitle}列表`, sectionHint: base.description, statuses: ['启用', '停用'], metrics: [{ label: '配置项', value: String(base.columns.length || 0), note: '当前页面', tone: 'info' }, { label: '待处理', value: '0', note: '暂无', tone: 'good' }, { label: '今日变更', value: '3', note: '已留痕', tone: 'info' }, { label: '异常', value: '0', note: '正常', tone: 'good' }], columns: base.columns.length ? base.columns : [{ key: 'name', label: '名称', width: 180 }, { key: 'status', label: '状态', format: 'status', width: 90 }], formFields: base.formFields.length ? base.formFields : [inputField('name', '名称'), selectField('status', '状态', [option('启用'), option('停用')])], workflowTitle: `${this.pageTitle}处理闭环`, workflowHint: '保存、审核、发布和日志查询在当前页面完成。', workflow: [{ title: '填写配置', detail: '完成必要字段' }, { title: '提交审核', detail: '按权限进入审批' }, { title: '生效留痕', detail: '记录版本和操作人' }] } },
+    dialogTitle() { return this.editingId ? `编辑${this.pageTitle}` : this.pageConfig.primaryAction },
+    filteredRows() { return this.rows.filter(row => (!this.keyword || Object.values(row).some(value => String(value).includes(this.keyword))) && (!this.statusFilter || row.status === this.statusFilter || row.publishStatus === this.statusFilter || row.taskStatus === this.statusFilter)) }
   },
-  watch: {
-    '$route.fullPath': {
-      immediate: true,
-      handler() {
-        this.initializePage()
-      }
-    }
-  },
+  watch: { '$route.fullPath': { immediate: true, handler() { this.initializePage() } }},
   methods: {
-    initializePage() {
-      this.resetFilters()
-      this.loadData()
+    initializePage() { this.keyword = ''; this.statusFilter = ''; this.form = {}; this.editingId = ''; this.rows = this.createRows() },
+    createRows() { const title = this.pageTitle; if (title === '系统设置') return [{ code: 'SYS-001', name: '默认门店时区', scope: '全部门店', value: 'Asia/Shanghai', updatedBy: '系统管理员', updatedAt: '2026-08-01', status: '启用', id: 'sys1' }, { code: 'SYS-014', name: '会员跨店查询', scope: '全部门店', value: '开启', updatedBy: '系统管理员', updatedAt: '2026-07-30', status: '启用', id: 'sys2' }, { code: 'SYS-021', name: '门店业务隔离', scope: '全部门店', value: '强制', updatedBy: '系统管理员', updatedAt: '2026-07-30', status: '启用', id: 'sys3' }]; if (title === '历史数据迁移工具') return [{ batchNo: 'MIG-260801-01', dataType: '会员主档', targetStore: '全部门店', total: '12,480', success: '12,462', failed: '18', status: '有失败', id: 'mig1' }, { batchNo: 'MIG-260731-02', dataType: '资产余额', targetStore: '上海静安店', total: '2,800', success: '2,800', failed: '0', status: '已完成', id: 'mig2' }, { batchNo: 'MIG-260728-01', dataType: '历史订单', targetStore: '杭州西湖店', total: '4,210', success: '4,210', failed: '0', status: '已完成', id: 'mig3' }]; if (['品牌定制', '品牌定制（Logo/主题色/专属域名）'].includes(title)) return [{ version: 'v2.4', themeName: '开派暖金', scope: '全部门店', domain: 'erp.kaipai.example', publisher: '品牌中心', updatedAt: '2026-08-01', status: '已发布', id: 'br1' }, { version: 'v2.5', themeName: '秋日米杏', scope: '上海静安店', domain: 'sh.kaipai.example', publisher: '品牌中心', updatedAt: '2026-08-01', status: '待发布', id: 'br2' }, { version: 'v2.3', themeName: '春日青绿', scope: '全部门店', domain: 'erp.kaipai.example', publisher: '品牌中心', updatedAt: '2026-06-10', status: '已回滚', id: 'br3' }]; return this.createConfigRows() },
+    createConfigRows() { const columns = this.pageConfig.columns; return [0, 1, 2].map(index => { const row = { id: `${this.pageConfig.mode || 'config'}-${index + 1}` }; columns.forEach(column => { row[column.key] = column.format === 'status' ? (index === 1 ? '停用' : '启用') : `${column.label}${index + 1}` }); return row }) },
+    resetFilters() { this.keyword = ''; this.statusFilter = '' },
+    applyFilters() { this.$message.success(`已查询${this.pageTitle}，共 ${this.filteredRows.length} 条`) },
+    runSecondaryAction() { this.$message.success(`${this.pageConfig.secondaryAction}任务已创建`) },
+    goTo(path) {
+      const query = Object.assign({}, this.$route.query)
+      this.$router.push({ path, query }).catch(() => {})
     },
-    resetFilters() {
-      const next = {}
-      this.config.filters.forEach(item => {
-        next[item.key] = ['dateRange', 'tree'].includes(item.type) ? [] : ''
-      })
-      this.filters = next
-    },
-    async loadData() {
-      this.loading = true
-      try {
-        const response = await getSystemModuleData(this.config.key, this.filters)
-        const list = response.data && response.data.list
-        this.rows = list && list.length ? list : this.createDemoRows()
-      } catch (error) {
-        this.rows = this.createDemoRows()
-      } finally {
-        this.loading = false
-      }
-    },
-    runLocalFilter() {
-      this.$message.info('仅筛选脱敏 Mock；原系统查询行为待二次核验')
-    },
-    createDemoRows() {
-      return Array.from({ length: 3 }, (_, index) => {
-        const row = { id: `${this.config.key}-${index + 1}` }
-        this.config.columns.forEach(item => {
-          row[item.key] = this.sampleValue(item, index)
-        })
-        return row
-      })
-    },
-    sampleValue(item, index) {
-      if (item.format === 'date') return `2026-07-${String(20 + index).padStart(2, '0')}`
-      if (item.format === 'number') return index + 1
-      if (item.format === 'status') return '演示状态'
-
-      const suffix = String.fromCharCode(65 + index)
-      const safeValues = {
-        account: `demo_user_${index + 1}`,
-        displayName: `演示用户${suffix}`,
-        mobile: '138****0000',
-        operator: `演示操作员${suffix}`,
-        recipient: `演示接收人${suffix}`,
-        recipientAddress: '138****0000',
-        ipAddress: '192.0.2.1',
-        departmentCode: `DEPT-DEMO-${index + 1}`,
-        departmentName: `演示部门${suffix}`,
-        roleCode: `ROLE-DEMO-${index + 1}`,
-        roleName: `演示角色${suffix}`,
-        workflowCode: `FLOW-DEMO-${index + 1}`,
-        workflowName: `演示流程${suffix}`,
-        taskCode: `TASK-DEMO-${index + 1}`,
-        taskName: `演示任务${suffix}`,
-        parameterValue: '演示值',
-        accessKey: '********'
-      }
-      return Object.prototype.hasOwnProperty.call(safeValues, item.key)
-        ? safeValues[item.key]
-        : `演示值${suffix}`
-    },
-    fieldTypeLabel(type) {
-      const labels = {
-        input: '输入框草案',
-        select: '下拉框草案（选项待核验）',
-        date: '日期控件草案',
-        dateRange: '日期范围草案',
-        number: '数字输入草案',
-        textarea: '多行文本草案',
-        tree: '树选择草案（层级待核验）',
-        switch: '开关草案（默认值待核验）'
-      }
-      return labels[type] || '控件类型待核验'
-    }
+    openCreate() { this.editingId = ''; this.form = {}; this.dialogVisible = true },
+    openEdit(row) { this.editingId = row.id; this.form = { ...row }; this.dialogVisible = true },
+    resetForm() { this.form = {}; this.editingId = '' },
+    saveRecord() { this.$refs.systemForm.validate(valid => { if (!valid) return; const record = { ...this.form, id: this.editingId || `new-${Date.now()}` }; if (this.editingId) { const index = this.rows.findIndex(row => row.id === this.editingId); this.$set(this.rows, index, { ...this.rows[index], ...record }) } else this.rows.unshift(record); this.dialogVisible = false; this.$message.success('已保存，后续将按当前权限进入发布/审批环节') }) },
+    handleRowAction(row) { this.$message.info(`${row.id}：已进入${this.pageConfig.rowAction}流程`) },
+    toggleRow(row) { const key = row.publishStatus ? 'publishStatus' : row.taskStatus ? 'taskStatus' : 'status'; const current = row[key]; this.$set(row, key, ['启用', '已发布', '运行中'].includes(current) ? '停用' : '启用'); this.$message.success('状态变更已记录操作日志') },
+    statusType(status) { if (['停用', '已回滚', '有失败'].includes(status)) return 'danger'; if (['待发布', '待预检', '导入中'].includes(status)) return 'warning'; return 'success' }
   }
 }
 </script>
 
 <style lang="scss" scoped>
-.system-workbench {
-  min-height: 100%;
-  padding: 20px;
-  color: #26344a;
-  background: #f4f7fa;
-}
-.hero-panel {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 25px 28px;
-  color: #fff;
-  background: linear-gradient(128deg, #425269, #65758b 62%, #8291a3);
-  border-radius: 15px;
-  box-shadow: 0 13px 30px rgba(50, 67, 88, .2);
-}
-.eyebrow {
-  margin-bottom: 9px;
-  color: #edf2f7;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: .6px;
-}
-.hero-panel h1 {
-  margin: 0 0 8px;
-  font-size: 27px;
-}
-.hero-panel p {
-  max-width: 760px;
-  margin: 0;
-  color: #eef3f8;
-  font-size: 14px;
-  line-height: 1.7;
-}
-.hero-status {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 8px;
-}
-.hero-status span {
-  color: #edf2f7;
-  font-size: 12px;
-}
-.evidence-alert {
-  margin-top: 14px;
-  border-radius: 10px;
-}
-.audit-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
-  margin-top: 16px;
-}
-.audit-card {
-  min-width: 0;
-  padding: 17px 19px;
-  background: #fff;
-  border: 1px solid #e2e8ef;
-  border-radius: 12px;
-}
-.audit-card span,
-.audit-card strong,
-.audit-card small {
-  display: block;
-}
-.audit-card span {
-  color: #76869a;
-  font-size: 12px;
-}
-.audit-card strong {
-  margin: 7px 0 5px;
-  color: #4f6176;
-  font-size: 22px;
-}
-.audit-card small {
-  overflow: hidden;
-  color: #9aa6b3;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.content-card {
-  margin-top: 16px;
-  border: 0;
-  border-radius: 12px;
-}
-.card-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.card-heading h2 {
-  margin: 0 0 4px;
-  font-size: 16px;
-}
-.card-heading p {
-  margin: 0;
-  color: #8996a5;
-  font-size: 12px;
-}
-.structure-list,
-.dependency-list,
-.gap-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 9px;
-}
-.structure-list span,
-.dependency-list span {
-  padding: 10px 13px;
-  color: #586a7a;
-  background: #f5f8fa;
-  border-radius: 8px;
-  font-size: 13px;
-}
-.structure-list i,
-.dependency-list i {
-  margin-right: 6px;
-  color: #718698;
-}
-.dependency-list span {
-  color: #886524;
-  background: #fff9eb;
-}
-.filter-form {
-  margin-bottom: -12px;
-}
-.filter-form ::v-deep .el-form-item {
-  margin-bottom: 16px;
-}
-.filter-form ::v-deep .el-form-item__label {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding-bottom: 5px;
-  color: #596b7c;
-  font-size: 12px;
-  line-height: 18px;
-}
-.filter-form ::v-deep .el-form-item__label em {
-  color: #d4982f;
-  font-size: 10px;
-  font-style: normal;
-}
-.full-control {
-  width: 100%;
-}
-.table-card ::v-deep .el-table th {
-  color: #405469;
-  background: #f5f8fa;
-}
-.header-unverified {
-  display: block;
-  color: #c88b2b;
-  font-size: 9px;
-  font-weight: 400;
-}
-.result-count {
-  color: #8593a3;
-  font-size: 12px;
-}
-.field-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 65px;
-  padding: 11px 13px;
-  margin-bottom: 12px;
-  background: #f8fafb;
-  border: 1px solid #e7edf1;
-  border-radius: 9px;
-}
-.field-card div {
-  min-width: 0;
-}
-.field-card strong,
-.field-card span {
-  display: block;
-}
-.field-card strong {
-  overflow: hidden;
-  color: #46596a;
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.field-card span {
-  margin-top: 5px;
-  color: #97a3ae;
-  font-size: 10px;
-}
-@media (max-width: 1000px) {
-  .audit-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  .hero-status {
-    align-items: flex-end;
-    flex-direction: column;
-  }
-}
-@media (max-width: 760px) {
-  .system-workbench {
-    padding: 12px;
-  }
-  .hero-panel,
-  .hero-status,
-  .card-heading {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .audit-grid {
-    grid-template-columns: 1fr;
-  }
-}
+.system-workbench { min-height: 100%; padding: 20px; color: #26344a; background: #f3f5f8; }.hero-panel { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 24px 28px; color: #fff; background: linear-gradient(125deg, #202c3b 0%, #445b76 56%, #7890a8 100%); border-radius: 15px; box-shadow: 0 14px 34px rgba(38, 56, 77, .2); }.eyebrow { margin-bottom: 8px; color: #d9e7f7; font-size: 13px; font-weight: 700; }.hero-panel h1 { margin: 0 0 8px; font-size: 27px; }.hero-panel p { max-width: 780px; margin: 0; color: #eff5fa; font-size: 14px; line-height: 1.7; }.hero-actions, .heading-actions { display: flex; align-items: center; gap: 10px; }.scope-alert { margin-top: 14px; border-radius: 10px; }.metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 14px; }.metric-card { padding: 16px 18px; background: #fff; border: 1px solid #e3e8ee; border-radius: 11px; }.metric-card span, .metric-card strong, .metric-card small { display: block; }.metric-card span { color: #7d8997; font-size: 12px; }.metric-card strong { margin: 7px 0 5px; color: #354a60; font-size: 24px; }.metric-card small { font-size: 12px; }.good { color: #339776; }.warn { color: #d18a32; }.bad { color: #d55f6a; }.info { color: #4c80bc; }.content-card, .workflow-card { margin-top: 14px; border: 0; border-radius: 12px; }.card-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }.card-heading h2 { margin: 0 0 4px; font-size: 16px; }.card-heading p { margin: 0; color: #8a98a7; font-size: 12px; }.filter-form { margin-bottom: 8px; }.data-table ::v-deep th { color: #455b71; background: #f5f8fb; }.empty-state { padding: 30px; color: #9ba7b3; text-align: center; }.workflow-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }.workflow-step { display: flex; gap: 10px; padding: 14px; background: #f5f8fb; border-radius: 9px; }.workflow-step > span { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 25px; width: 25px; height: 25px; color: #fff; background: #5b7898; border-radius: 50%; font-size: 12px; }.workflow-step strong, .workflow-step small { display: block; }.workflow-step strong { color: #455b70; font-size: 13px; }.workflow-step small { margin-top: 5px; color: #8c99a7; font-size: 11px; line-height: 1.5; }.full-control { width: 100%; }
+.settings-entry-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }.settings-entry { display: flex; align-items: flex-start; gap: 12px; min-height: 92px; padding: 18px; color: #26344a; background: linear-gradient(145deg, #fff, #f6f2e9); border: 1px solid #e9dec8; border-radius: 11px; cursor: pointer; text-align: left; transition: .18s ease; }.settings-entry:hover { border-color: #bf8f3d; box-shadow: 0 7px 18px rgba(102, 75, 38, .12); transform: translateY(-2px); }.settings-entry > i { padding: 9px; color: #9c6f2d; background: #f5ead5; border-radius: 9px; font-size: 18px; }.settings-entry__icon { display: grid; flex: 0 0 38px; place-items: center; width: 38px; height: 38px; color: #9c6f2d; background: #f5ead5; border-radius: 9px; }.settings-entry__body { flex: 1; }.settings-entry b, .settings-entry small { display: block; }.settings-entry b { margin-top: 2px; font-size: 15px; }.settings-entry small { margin-top: 7px; color: #788596; font-size: 12px; line-height: 1.55; }.settings-guide { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }.settings-guide > div { padding: 15px; background: #f7f9fb; border-left: 3px solid #b88b44; border-radius: 8px; }.settings-guide b, .settings-guide span, .settings-guide small { display: block; }.settings-guide span { margin-bottom: 5px; color: #b28643; font-size: 18px; font-weight: 700; }.settings-guide small { margin-top: 5px; color: #778596; font-size: 12px; line-height: 1.55; }.advanced-settings { margin-top: 14px; padding: 0 16px; color: #657487; background: #f8fafc; border: 1px solid #e6ebf1; border-radius: 10px; }.advanced-settings summary { padding: 13px 0; color: #53677b; font-size: 13px; cursor: pointer; }.advanced-settings ul { margin: 0 0 14px; padding-left: 20px; font-size: 12px; line-height: 2; }
+@media (max-width: 1000px) { .metric-grid, .settings-entry-grid { grid-template-columns: repeat(2, 1fr); }.hero-panel { align-items: flex-start; flex-direction: column; }.workflow-steps, .settings-guide { grid-template-columns: 1fr; } } @media (max-width: 700px) { .system-workbench { padding: 12px; }.metric-grid, .settings-entry-grid { grid-template-columns: 1fr; }.card-heading, .heading-actions { align-items: flex-start; flex-direction: column; } }
 </style>

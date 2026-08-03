@@ -310,3 +310,6 @@ aside {
 .multiselect--active {
   z-index: 1000 !important;
 }
+
+// 品牌主题必须最后载入，确保覆盖脚手架与 Element UI 的旧默认色。
+@import './erp-gold-theme.scss';

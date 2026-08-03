@@ -1,6 +1,6 @@
 const stores = [
-  { id: 'ST001', name: '中心广场旗舰店', code: 'QD-ZXGC', manager: '王店长', departments: 9, employees: 46, rooms: 28, status: '启用' },
-  { id: 'ST002', name: '黄河路轻奢店', code: 'QD-HHL', manager: '李店长', departments: 7, employees: 31, rooms: 18, status: '启用' }
+  { id: 'ST001', name: '中心广场旗舰店', code: 'QD-ZXGC', manager: '王店长', departments: 9, employees: 46, rooms: 36, status: '启用' },
+  { id: 'ST002', name: '黄河路轻奢店', code: 'QD-HHL', manager: '李店长', departments: 7, employees: 31, rooms: '资料待补', status: '启用' }
 ]
 
 const departments = [
@@ -89,4 +89,3 @@ module.exports = [
     })
   }
 ]
-

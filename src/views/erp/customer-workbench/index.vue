@@ -2,7 +2,7 @@
   <div class="customer-workbench">
     <section class="hero-panel">
       <div class="hero-copy">
-        <div class="eyebrow"><i :class="config.icon" /> 客户管理 · 原 ERP 字段级复刻</div>
+        <div class="eyebrow"><i :class="config.icon" /> 客户管理 · 业务工作台</div>
         <h1>{{ pageTitle }}</h1>
         <p>{{ config.description }}</p>
       </div>
@@ -64,13 +64,26 @@
       </section>
 
       <section v-if="config.stages" class="stage-strip">
-        <button v-for="(stage, index) in config.stages" :key="stage" :class="{ active: activeStage === stage }" @click="activeStage = stage">
-          <span>{{ stage }}</span><b>{{ Math.max(0, 36 - index * 3) }}</b>
+        <button v-for="stage in config.stages" :key="stage" :class="{ active: activeStage === stage }" @click="activeStage = stage">
+          <span>{{ stage }}</span><b>{{ stageCounts[stage] || 0 }}</b>
         </button>
       </section>
 
+      <section v-if="isTagWorkbench" class="tag-overview">
+        <div class="tag-overview__copy">
+          <h2>客户标签分布</h2>
+          <p>标签来自客户档案，不跨门店修改客户归属；“全部门店”仅做汇总查看。</p>
+        </div>
+        <div class="tag-cloud">
+          <el-tag v-for="item in tagSummary" :key="item.name" effect="plain">
+            {{ item.name }} <b>{{ item.count }}</b>
+          </el-tag>
+          <span v-if="!tagSummary.length" class="empty-tag-tip">当前客户档案尚未维护标签</span>
+        </div>
+      </section>
+
       <section v-if="pageTitle === '客户管理'" class="reminder-strip">
-        <div v-for="item in reminders" :key="item.label" @click="applyReminder(item)">
+        <div v-for="item in reminderItems" :key="item.label" @click="applyReminder(item)">
           <i :class="item.icon" /><span>{{ item.label }}</span><strong>{{ item.count }}</strong><small>{{ item.tip }}</small>
         </div>
       </section>
@@ -87,7 +100,16 @@
           <el-row :gutter="16">
             <el-col v-for="field in visibleFilters" :key="field.key" :xl="4" :lg="6" :md="8" :sm="12" :xs="24">
               <el-form-item :label="field.label">
-                <el-input v-if="field.type === 'input'" v-model.trim="filters[field.key]" clearable :placeholder="`请输入${field.label}`" @keyup.enter.native="search" />
+                <el-input
+                  v-if="field.type === 'input'"
+                  v-model.trim="filters[field.key]"
+                  clearable
+                  :maxlength="isPhoneField(field) ? 11 : 100"
+                  :inputmode="isPhoneField(field) ? 'numeric' : undefined"
+                  :placeholder="`请输入${field.label}`"
+                  @input="handleFilterInput(field, $event)"
+                  @keyup.enter.native="search"
+                />
                 <el-select v-else-if="field.type === 'select'" v-model="filters[field.key]" clearable filterable placeholder="请选择" class="full-control">
                   <el-option v-for="option in field.options" :key="option" :label="option" :value="option" />
                 </el-select>
@@ -159,8 +181,15 @@
         <el-row :gutter="18">
           <el-col v-for="field in dialogFields" :key="field.key" :span="field.type === 'textarea' ? 24 : 12">
             <el-form-item :label="field.label" :required="isRequired(field)">
-              <el-input v-if="field.type === 'input'" v-model.trim="recordForm[field.key]" :placeholder="`请输入${field.label}`" />
-              <el-input v-else-if="field.type === 'textarea'" v-model.trim="recordForm[field.key]" type="textarea" :rows="3" :placeholder="`请输入${field.label}`" />
+              <el-input
+                v-if="field.type === 'input'"
+                v-model.trim="recordForm[field.key]"
+                :maxlength="isPhoneField(field) ? 11 : 100"
+                :inputmode="isPhoneField(field) ? 'numeric' : undefined"
+                :placeholder="`请输入${field.label}`"
+                @input="handleDialogInput(field, $event)"
+              />
+              <el-input v-else-if="field.type === 'textarea'" v-model.trim="recordForm[field.key]" type="textarea" :rows="3" maxlength="500" show-word-limit :placeholder="`请输入${field.label}`" />
               <el-select v-else-if="field.type === 'select'" v-model="recordForm[field.key]" filterable clearable placeholder="请选择" class="full-control">
                 <el-option v-for="option in field.options" :key="option" :label="option" :value="option" />
               </el-select>
@@ -183,24 +212,41 @@
           <el-descriptions-item v-for="column in config.columns" :key="column.key" :label="column.label">{{ currentRow[column.key] }}</el-descriptions-item>
         </el-descriptions>
         <h3>业务轨迹</h3>
-        <el-timeline>
-          <el-timeline-item timestamp="今天 09:30" type="primary">当前页面完成查看</el-timeline-item>
-          <el-timeline-item timestamp="昨天 16:10">系统自动更新客户状态</el-timeline-item>
-          <el-timeline-item timestamp="07-21 11:20">业务人员录入跟进信息</el-timeline-item>
-        </el-timeline>
+        <p class="audit-empty">操作轨迹由审计接口返回；当前未返回轨迹时不展示推测记录。</p>
       </div>
     </el-drawer>
   </div>
 </template>
 
 <script>
-import { getCustomerPageConfig, pointSettingGroups } from '@/config/customer-pages'
+import { getCustomerPageConfig, leadFollowStatuses, pointSettingGroups } from '@/config/customer-pages'
 import { getCustomerModuleData, performCustomerModuleAction, saveCustomerModuleRecord, savePointSettings } from '@/api/erp-customer'
+import { mapGetters } from 'vuex'
 
 const inputField = (key, label) => ({ key, label, type: 'input' })
 const textareaField = (key, label) => ({ key, label, type: 'textarea' })
 const selectField = (key, label, options) => ({ key, label, type: 'select', options })
 const dateField = (key, label, dateType = 'datetime') => ({ key, label, type: 'date', dateType })
+const storeByRouteId = { 1: '中心广场旗舰店', 2: '黄河路轻奢店' }
+const rangeFieldAliases = {
+  createdRange: 'createdAt',
+  dueRange: 'dueDate',
+  followRange: 'followedAt',
+  appointmentRange: 'appointmentAt',
+  visitRange: 'visitAt',
+  signedRange: 'signedAt'
+}
+
+function routeStoreName(route) {
+  const query = (route && route.query) || {}
+  return storeByRouteId[Number(query.storeId)] || (Object.values(storeByRouteId).includes(query.store) ? query.store : '')
+}
+
+function localDateTimeText() {
+  const now = new Date()
+  const offset = now.getTimezoneOffset() * 60000
+  return new Date(now.getTime() - offset).toISOString().slice(0, 16).replace('T', ' ')
+}
 
 export default {
   name: 'CustomerWorkbench',
@@ -224,25 +270,26 @@ export default {
       currentRow: null,
       drawerVisible: false,
       pointSettingGroups,
-      pointSettings: {},
-      reminders: [
-        { label: '今日应跟进', count: 12, tip: '按跟进频次', icon: 'el-icon-phone-outline', filter: '跟进' },
-        { label: '7 天内预产', count: 6, tip: '待确认入住', icon: 'el-icon-date', filter: '预产' },
-        { label: '今日待入住', count: 3, tip: '房间已预留', icon: 'el-icon-house', filter: '入住' },
-        { label: '今日待离店', count: 4, tip: '需回访结账', icon: 'el-icon-s-home', filter: '离店' },
-        { label: '欠款待授权', count: 2, tip: '金额需复核', icon: 'el-icon-bank-card', filter: '欠款' }
-      ]
+      pointSettings: {}
     }
   },
   computed: {
+    ...mapGetters(['currentStoreId']),
+    hasConcreteStore() { return this.currentStoreId && String(this.currentStoreId) !== 'all' },
     pageTitle() {
-      return this.$route.meta.title
+      return this.$route.meta.configTitle || this.$route.meta.title
     },
     config() {
       return getCustomerPageConfig(this.pageTitle)
     },
     isPointSettings() {
       return this.pageTitle === '积分设置'
+    },
+    isTrackingWorkbench() {
+      return this.pageTitle === '业务跟踪台'
+    },
+    isTagWorkbench() {
+      return this.pageTitle === '客户标签体系'
     },
     defaultFilterCount() {
       return 8
@@ -253,14 +300,20 @@ export default {
     filteredRows() {
       let data = this.rows
       if (this.config.stages && this.activeStage !== '全部') {
-        data = data.filter((row, index) => row.status === this.activeStage || index % 3 !== 1)
+        data = data.filter(row => this.stageForRow(row) === this.activeStage)
       }
       const entries = Object.entries(this.filters).filter(([, value]) => value !== '' && value !== null && value !== false && (!Array.isArray(value) || value.length))
       if (!entries.length) return data
       return data.filter(row => entries.every(([key, value]) => {
-        if (Array.isArray(value)) return true
-        const target = String(row[key] || row.name || row.customerName || '')
-        return target.includes(String(value))
+        const field = this.config.filters.find(item => item.key === key) || {}
+        const targetValue = row[key] !== undefined ? row[key] : row[rangeFieldAliases[key]]
+        if (Array.isArray(value)) {
+          const target = String(targetValue || '').slice(0, 10)
+          return (!value[0] || target >= value[0]) && (!value[1] || target <= value[1])
+        }
+        if (key === 'unfollowedDays') return Number(targetValue || 0) >= Number(value || 0)
+        if (field.type === 'select') return String(targetValue || '') === String(value)
+        return String(targetValue || '').toLowerCase().includes(String(value).toLowerCase())
       }))
     },
     pagedRows() {
@@ -275,8 +328,33 @@ export default {
     },
     metrics() {
       const count = this.rows.length
+      if (this.isTrackingWorkbench) {
+        const dueSoon = this.rows.filter(item => item.dueDate && String(item.dueDate).slice(0, 10) >= this.todayText).length
+        return [
+          { label: '客户总数', value: count, tip: '来自当前门店权限范围' },
+          { label: '意向客户', value: this.stageCounts['意向客户'] || 0, tip: '需要销售持续跟进' },
+          { label: '已签约客户', value: this.stageCounts['已签约客户'] || 0, tip: '已进入合同链路' },
+          { label: '有预产期客户', value: dueSoon, tip: '用于安排后续跟进' }
+        ]
+      }
+      if (this.isTagWorkbench) {
+        return [
+          { label: '客户总数', value: count, tip: '当前查询范围' },
+          { label: '已维护标签', value: this.rows.filter(item => this.rowTags(item).length).length, tip: '至少包含一个标签' },
+          { label: '标签种类', value: this.tagSummary.length, tip: '真实档案去重统计' },
+          { label: '待补标签', value: this.rows.filter(item => !this.rowTags(item).length).length, tip: '建议后续完善档案' }
+        ]
+      }
+      if (this.pageTitle === '线索管理') {
+        const statusCount = status => this.rows.filter(item => item.followStatus === status).length
+        return [
+          { label: '线索总量', value: count, tip: '当前门店线索' },
+          { label: '待跟进', value: statusCount('待跟进'), tip: '尚无有效跟进记录' },
+          { label: '跟进中', value: statusCount('跟进中'), tip: '已有跟进且未关闭' },
+          { label: '已转化', value: statusCount('已转化'), tip: '已进入客户或签约流程' }
+        ]
+      }
       const labels = {
-        '线索管理': ['线索总量', '跟进中', '今日新增', '待转化'],
         '预约参观': ['预约总量', '今日到店', '已确认', '已转化'],
         '客户投诉建议': ['投诉总量', '未处理', '处理中', '已完成'],
         '客户消息': ['消息总量', '待发送', '发送成功', '发送失败'],
@@ -284,6 +362,41 @@ export default {
       }
       const current = labels[this.pageTitle] || ['当前记录', '本月新增', '待处理', '已完成']
       return current.map((label, index) => ({ label, value: index === 0 ? count : 0, tip: '当前查询结果' }))
+    },
+    reminderItems() {
+      const countStage = stage => this.rows.filter(row => this.stageForRow(row) === stage).length
+      const withinSevenDays = this.rows.filter(row => {
+        const due = String(row.dueDate || '').slice(0, 10)
+        if (!due) return false
+        const days = Math.floor((new Date(`${due}T00:00:00`).getTime() - new Date(`${this.todayText}T00:00:00`).getTime()) / 86400000)
+        return days >= 0 && days <= 7
+      }).length
+      return [
+        { label: '待持续跟进', count: countStage('意向客户') + countStage('进店客户'), tip: '按客户状态统计', icon: 'el-icon-phone-outline', stage: '意向客户' },
+        { label: '7 天内预产', count: withinSevenDays, tip: '来自已录预产期档案', icon: 'el-icon-date' },
+        { label: '待入住客户', count: countStage('待入住客户'), tip: '按当前客户状态统计', icon: 'el-icon-house', stage: '待入住客户' },
+        { label: '已退房待回访', count: countStage('已退房客户'), tip: '按当前客户状态统计', icon: 'el-icon-s-home', stage: '已退房客户' },
+        { label: '签约客户', count: countStage('已签约客户'), tip: '按当前客户状态统计', icon: 'el-icon-document-checked', stage: '已签约客户' }
+      ]
+    },
+    todayText() {
+      const date = new Date()
+      const pad = value => String(value).padStart(2, '0')
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    },
+    stageCounts() {
+      const counts = { 全部: this.rows.length }
+      ;(this.config.stages || []).forEach(stage => { if (stage !== '全部') counts[stage] = 0 })
+      this.rows.forEach(row => {
+        const stage = this.stageForRow(row)
+        if (stage) counts[stage] = (counts[stage] || 0) + 1
+      })
+      return counts
+    },
+    tagSummary() {
+      const counts = {}
+      this.rows.forEach(row => this.rowTags(row).forEach(tag => { counts[tag] = (counts[tag] || 0) + 1 }))
+      return Object.entries(counts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, 20)
     },
     percentRuleCount() {
       return Object.values(this.pointSettings).filter(item => item.mode === 'percent').length
@@ -293,7 +406,8 @@ export default {
     }
   },
   watch: {
-    '$route.meta.title': {
+    currentStoreId() { this.initializePage() },
+    '$route.fullPath': {
       immediate: true,
       handler() {
         this.initializePage()
@@ -306,6 +420,8 @@ export default {
         this.$set(result, field.key, field.type === 'checkbox' ? false : field.type === 'dateRange' ? [] : '')
         return result
       }, {})
+      const store = routeStoreName(this.$route)
+      if (store && Object.prototype.hasOwnProperty.call(this.filters, 'store')) this.filters.store = store
       this.activeStage = this.config.stages ? this.config.stages[0] : '全部'
       this.filtersExpanded = false
       this.pagination.page = 1
@@ -321,8 +437,9 @@ export default {
       if (this.isPointSettings) return
       this.loading = true
       try {
-        const response = await getCustomerModuleData(this.config.key, this.filters)
-        this.rows = response.data && Array.isArray(response.data.list) ? response.data.list : []
+        const response = await getCustomerModuleData(this.config.key, { ...this.filters, storeId: this.currentStoreId || 'all' })
+        const list = response.data && Array.isArray(response.data.list) ? response.data.list : []
+        this.rows = this.normalizeRows(list)
       } catch (error) {
         this.rows = []
       } finally {
@@ -335,8 +452,34 @@ export default {
     },
     resetFilters() {
       Object.keys(this.filters).forEach(key => { this.filters[key] = Array.isArray(this.filters[key]) ? [] : typeof this.filters[key] === 'boolean' ? false : '' })
+      const store = routeStoreName(this.$route)
+      if (store && Object.prototype.hasOwnProperty.call(this.filters, 'store')) this.filters.store = store
       this.activeStage = this.config.stages ? this.config.stages[0] : '全部'
       this.pagination.page = 1
+    },
+    normalizeRows(rows) {
+      if (this.pageTitle !== '线索管理') return rows
+      return rows.map(row => ({
+        ...row,
+        store: row.store || row.convertStore || '',
+        followStatus: leadFollowStatuses.includes(row.followStatus) ? row.followStatus : ''
+      }))
+    },
+    stageForRow(row) {
+      const status = String(row.status || '')
+      if (/流失/.test(status)) return '流失客户'
+      if (/散客|零散/.test(status)) return '零散客户'
+      if (/已退房/.test(status)) return '已退房客户'
+      if (/已入住/.test(status)) return '已入住客户'
+      if (/已订房|待入住|未入住/.test(status)) return '待入住客户'
+      if (/已签|同意签合同|已审核/.test(status) || row.contractNo) return '已签约客户'
+      if (/进店|到店/.test(status)) return '进店客户'
+      if (/意向/.test(status)) return '意向客户'
+      return ''
+    },
+    rowTags(row) {
+      if (Array.isArray(row.tags)) return row.tags.map(item => String(item).trim()).filter(Boolean)
+      return String(row.tags || '').split(/[、,，;；]/).map(item => item.trim()).filter(Boolean)
     },
     actionIcon(action) {
       if (action.includes('添加') || action.includes('新增')) return 'el-icon-plus'
@@ -345,7 +488,7 @@ export default {
       if (action.includes('导出')) return 'el-icon-download'
       if (action.includes('导入')) return 'el-icon-upload2'
       if (action.includes('打印') || action.includes('二维码')) return 'el-icon-printer'
-      if (action.includes('跟踪')) return 'el-icon-chat-line-round'
+      if (action.includes('跟进') || action.includes('跟踪')) return 'el-icon-chat-line-round'
       return 'el-icon-setting'
     },
     handleAction(action) {
@@ -359,7 +502,7 @@ export default {
       if (action.includes('打印') || action.includes('二维码')) return this.$message.success(`${action}任务已生成，可进入打印预览`)
       if (action.includes('添加') || action.includes('新增')) return this.openCreate(action)
       if (action === '编辑') return this.openEdit(this.requireOne())
-      if (action.includes('跟踪')) return this.openFollow()
+      if (action.includes('跟进') || action.includes('跟踪')) return this.openFollow()
       this.openOperation(action)
     },
     requireOne() {
@@ -368,15 +511,19 @@ export default {
       return row
     },
     openCreate(action = '添加') {
+      if (!this.hasConcreteStore) return this.$message.warning('全部门店仅支持汇总查询，请先选择具体门店再新增')
       this.dialogMode = 'create'
       this.dialogAction = action
       this.dialogTitle = `${action}${this.pageTitle}`
       this.dialogFields = this.config.formFields.length ? this.config.formFields : [inputField('customerName', '客户姓名'), textareaField('remark', '备注')]
       this.recordForm = this.emptyForm(this.dialogFields)
+      const store = routeStoreName(this.$route)
+      if (store && Object.prototype.hasOwnProperty.call(this.recordForm, 'store')) this.recordForm.store = store
       this.dialogVisible = true
     },
     openEdit(row) {
       if (!row) return
+      if (!this.hasConcreteStore) return this.$message.warning('全部门店仅支持汇总查询，请先选择具体门店再编辑')
       this.dialogMode = 'edit'
       this.dialogAction = '编辑'
       this.dialogTitle = `编辑${this.pageTitle}`
@@ -389,30 +536,39 @@ export default {
       this.dialogVisible = true
     },
     openFollow() {
-      if (!this.requireOne()) return
+      const selected = this.requireOne()
+      if (!selected) return
+      if (!this.hasConcreteStore) return this.$message.warning('全部门店仅支持汇总查询，请先选择具体门店再保存跟进')
       this.dialogMode = 'operation'
-      this.dialogAction = '客户跟踪'
+      this.dialogAction = '客户跟进'
       this.dialogTitle = '新增客户跟进记录'
       this.operationTip = '保存后将同步更新客户最后跟进时间、跟进状态和下次跟进计划。'
-      this.dialogFields = [inputField('customerName', '客户名称'), dateField('followedAt', '跟踪时间'), selectField('followStatus', '跟踪状态', ['未处理', '跟进中', '关闭', '已转化']), selectField('followType', '跟踪类型', ['销售', '咨询', '回访', '探访', '投诉']), selectField('contactType', '接触方式', ['微信交流', '店外面谈', '电话交流', '来店参观']), dateField('nextFollowAt', '下一跟踪时间'), textareaField('content', '跟踪信息')]
+      this.dialogFields = [inputField('customerName', '客户名称'), dateField('followedAt', '跟进时间'), selectField('followStatus', '跟进状态', leadFollowStatuses), selectField('followType', '跟进类型', ['销售', '咨询', '回访', '探访', '投诉']), selectField('contactType', '接触方式', ['微信交流', '店外面谈', '电话交流', '来店参观']), dateField('nextFollowAt', '下次跟进时间'), textareaField('content', '跟进内容')]
       this.recordForm = this.emptyForm(this.dialogFields)
-      this.recordForm.customerName = this.displayName(this.selection[0])
+      this.recordForm.id = selected.id
+      this.recordForm.customerName = this.displayName(selected)
+      this.recordForm.followedAt = localDateTimeText()
+      this.recordForm.followStatus = leadFollowStatuses.includes(selected.followStatus) ? selected.followStatus : '跟进中'
       this.dialogVisible = true
     },
     openOperation(action) {
       const selected = this.requireOne()
       if (!selected) return
+      if (!this.hasConcreteStore) return this.$message.warning('全部门店仅支持汇总查询，请先选择具体门店再操作')
       this.dialogMode = 'operation'
       this.dialogAction = action
       this.dialogTitle = action
       this.operationTip = `${action}将由后端校验权限与业务状态，并写入操作轨迹。`
       this.dialogFields = this.operationFields(action)
       this.recordForm = this.emptyForm(this.dialogFields)
+      this.recordForm.id = selected.id
       this.recordForm.customerName = this.displayName(selected)
       this.dialogVisible = true
     },
     operationFields(action) {
-      if (action.includes('分配') || action === '转让') return [inputField('customerName', '客户名称'), selectField('assignee', '分配给', ['李顾问', '王顾问', '陈顾问']), selectField('store', '所属门店', ['中心广场旗舰店', '黄河路轻奢店', '郑东新区店']), textareaField('remark', '分配说明')]
+      if (action.includes('分配') || action.includes('转让')) return [inputField('customerName', '客户名称'), selectField('assignee', '分配给', ['李顾问', '王顾问', '陈顾问']), selectField('store', '所属门店', ['中心广场旗舰店', '黄河路轻奢店']), textareaField('remark', '分配说明')]
+      if (action === '转化') return [inputField('customerName', '客户名称'), selectField('store', '转化门店', ['中心广场旗舰店', '黄河路轻奢店']), textareaField('remark', '转化说明')]
+      if (action === '关闭') return [inputField('customerName', '客户名称'), textareaField('content', '关闭原因')]
       if (action.includes('合同')) return [inputField('customerName', '客户名称'), inputField('contractNo', '合同编号'), selectField('packageName', '合同套餐', ['基础套餐', '修复套餐', '修养套餐']), inputField('contractAmount', '合同金额'), inputField('deposit', '定金金额'), dateField('signedAt', '签订日期', 'date')]
       if (action.includes('审核') || action.includes('授权')) return [inputField('customerName', '客户名称'), selectField('decision', '审核结果', ['同意', '驳回', '退回修改']), inputField('amount', '涉及金额'), textareaField('remark', '审核意见')]
       if (action.includes('发送')) return [inputField('customerName', '客户名称'), selectField('channel', '发送渠道', ['短信', '微信', '站内消息']), textareaField('content', '发送内容')]
@@ -424,11 +580,49 @@ export default {
         return result
       }, {})
     },
+    isPhoneField(field) {
+      return Boolean(field && (
+        /mobile|phone/i.test(String(field.key || '')) ||
+        /手机号|手机号码|联系电话|客户电话|探访人电话/.test(String(field.label || ''))
+      ))
+    },
+    normalizeFieldInput(field, value) {
+      const text = String(value === undefined || value === null ? '' : value)
+      return this.isPhoneField(field)
+        ? text.replace(/\D/g, '').slice(0, 11)
+        : text.slice(0, 100)
+    },
+    handleFilterInput(field, value) {
+      const normalized = this.normalizeFieldInput(field, value)
+      if (normalized !== value) this.$set(this.filters, field.key, normalized)
+    },
+    handleDialogInput(field, value) {
+      const normalized = this.normalizeFieldInput(field, value)
+      if (normalized !== value) this.$set(this.recordForm, field.key, normalized)
+    },
     async saveRecord() {
-      const firstRequired = this.dialogFields.find(field => this.isRequired(field))
-      if (firstRequired && !this.recordForm[firstRequired.key]) {
-        this.$message.warning(`请填写${firstRequired.label}`)
+      if (!this.hasConcreteStore) return this.$message.warning('全部门店仅支持汇总查询，请先选择具体门店再保存')
+      const missingRequired = this.dialogFields.find(field => this.isRequired(field) && !this.recordForm[field.key])
+      if (missingRequired) {
+        this.$message.warning(`请填写${missingRequired.label}`)
         return
+      }
+      const invalidPhone = this.dialogFields.find(field => (
+        this.isPhoneField(field) &&
+        this.recordForm[field.key] &&
+        !/^1[3-9]\d{9}$/.test(String(this.recordForm[field.key]))
+      ))
+      if (invalidPhone) {
+        this.$message.warning(`${invalidPhone.label}须为中国大陆 11 位手机号`)
+        return
+      }
+      if (this.dialogAction === '客户跟进' || this.dialogAction === '客户跟踪') {
+        if (!this.recordForm.followedAt || !this.recordForm.followStatus || !this.recordForm.content) {
+          return this.$message.warning('请完整填写跟进时间、跟进状态和跟进内容')
+        }
+        if (this.recordForm.followStatus === '跟进中' && !this.recordForm.nextFollowAt) {
+          return this.$message.warning('跟进中的线索必须填写下次跟进时间')
+        }
       }
       this.saving = true
       try {
@@ -464,7 +658,13 @@ export default {
       this.drawerVisible = true
     },
     applyReminder(item) {
-      this.$message.success(`已加载“${item.label}”快捷查询，共 ${item.count} 条待办`)
+      if (item.stage && (this.config.stages || []).includes(item.stage)) {
+        this.activeStage = item.stage
+        this.pagination.page = 1
+        this.$message.success(`已按“${item.label}”筛选当前门店的 ${item.count} 条客户记录`)
+        return
+      }
+      this.$message.info(`“${item.label}”共 ${item.count} 条，数据仅按已录入档案统计。`)
     },
     async savePoints() {
       this.saving = true
@@ -491,7 +691,7 @@ export default {
       return row.customerName || row.name || row.visitor || row.title || row.id
     },
     isRequired(field) {
-      return ['customerName', 'name', 'mobile', 'visitor', 'title', 'content'].includes(field.key)
+      return field.required === true || ['customerName', 'name', 'mobile', 'visitor', 'title', 'content'].includes(field.key)
     },
     isMoneyColumn(key) {
       return /amount|balance/i.test(key)
@@ -514,16 +714,23 @@ export default {
 
 <style lang="scss" scoped>
 .customer-workbench { min-height: calc(100vh - 84px); padding: 22px; background: #f3f6fa; color: #25324a; }
-.hero-panel { display: flex; justify-content: space-between; align-items: center; gap: 28px; padding: 26px 30px; border-radius: 16px; color: white; background: linear-gradient(125deg, #10284a 0%, #174b70 58%, #1c7a7a 100%); box-shadow: 0 14px 34px rgba(19, 56, 88, .18); }
+.hero-panel { display: flex; justify-content: space-between; align-items: center; gap: 28px; padding: 26px 30px; border-radius: 16px; color: white; background: linear-gradient(125deg, #28241e 0%, #5f4b2d 56%, #a68045 100%); box-shadow: 0 14px 34px rgba(74, 55, 26, .2); }
 .hero-copy { min-width: 0; }
-.eyebrow { margin-bottom: 9px; color: #a9e8df; font-size: 13px; font-weight: 700; letter-spacing: .7px; }
+.eyebrow { margin-bottom: 9px; color: #f3dfb7; font-size: 13px; font-weight: 700; letter-spacing: .7px; }
 .hero-copy h1 { margin: 0 0 9px; font-size: 27px; line-height: 1.2; }
-.hero-copy p { max-width: 760px; margin: 0; color: #d7e6ef; font-size: 14px; line-height: 1.7; }
+.hero-copy p { max-width: 760px; margin: 0; color: #f7efe0; font-size: 14px; line-height: 1.7; }
 .hero-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; }
 .metric-strip, .point-overview { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 16px; overflow: hidden; border: 1px solid #e4eaf2; border-radius: 12px; background: #e4eaf2; }
 .metric-item, .point-overview > div { padding: 18px 22px; background: white; }
 .metric-item span, .point-overview span { display: block; color: #718096; font-size: 12px; }
-.metric-item strong, .point-overview strong { display: block; margin: 7px 0 3px; color: #143d5b; font-size: 25px; }
+.metric-item strong, .point-overview strong { display: block; margin: 7px 0 3px; color: #8c6a36; font-size: 25px; }
+.tag-overview { display: flex; gap: 24px; align-items: center; margin-bottom: 16px; padding: 18px 22px; border: 1px solid #eadfcf; border-radius: 12px; background: linear-gradient(135deg, #fffdf9, #f8f3e9); }
+.tag-overview__copy { min-width: 240px; }
+.tag-overview__copy h2 { margin: 0 0 5px; color: #2f3c50; font-size: 17px; }
+.tag-overview__copy p { margin: 0; color: #7d8898; font-size: 12px; }
+.tag-cloud { display: flex; flex: 1; flex-wrap: wrap; gap: 8px; }
+.tag-cloud b { margin-left: 5px; color: #9b743c; }
+.empty-tag-tip { color: #98a2b1; font-size: 13px; }
 .metric-item small { color: #9aa7b6; }
 .point-overview { grid-template-columns: repeat(3, 1fr) auto; align-items: stretch; }
 .point-overview .el-button { margin: 17px; }
@@ -571,6 +778,7 @@ export default {
 .detail-drawer { padding: 0 22px 28px; }
 .detail-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; font-size: 19px; font-weight: 700; }
 .detail-drawer h3 { margin: 25px 0 18px; font-size: 15px; }
+.audit-empty { padding: 12px 14px; border: 1px dashed #d8c7a5; border-radius: 8px; color: #7c6c53; background: #fffaf1; font-size: 13px; line-height: 1.7; }
 @media (max-width: 1200px) {
   .reminder-strip { grid-template-columns: repeat(3, 1fr); }
   .point-grid { grid-template-columns: 1fr; }

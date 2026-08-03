@@ -24,10 +24,14 @@ import * as filters from './filters' // global filters
  * you want to use MockJs for mock api
  * you can execute: mockXHR()
  *
- * Currently MockJs will be used in the production environment,
- * please remove it before going online ! ! !
+ * MockJs is only allowed when the selected runtime explicitly enables it.
+ * API/MVP production builds must never inject browser-side fake responses.
  */
-if (process.env.NODE_ENV === 'production') {
+if (
+  process.env.NODE_ENV === 'production' &&
+  process.env.VUE_APP_ENABLE_MOCK === 'true' &&
+  process.env.VUE_APP_RUNTIME_MODE !== 'mvp'
+) {
   const { mockXHR } = require('../mock')
   mockXHR()
 }

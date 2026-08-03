@@ -2,7 +2,7 @@
   <div class="sales-workbench">
     <section class="hero-panel">
       <div>
-        <div class="eyebrow"><i :class="config.icon" /> 销售管理 · 实时业务数据</div>
+        <div class="eyebrow"><i :class="config.icon" /> 销售管理 · {{ dataScopeLabel }}</div>
         <h1>{{ pageTitle }}</h1>
         <p>{{ config.description }}</p>
       </div>
@@ -10,6 +10,15 @@
         <el-tag type="success" effect="plain"><i class="el-icon-circle-check" /> 权限与门店已对齐</el-tag>
         <el-button icon="el-icon-refresh" :loading="loading" @click="loadData">刷新</el-button>
         <el-button type="primary" icon="el-icon-download" @click="exportRows">导出当前结果</el-button>
+      </div>
+    </section>
+    <section class="sales-focus-panel" :class="`focus-${salesSemantic.mode}`">
+      <div class="focus-heading">
+        <i :class="salesSemantic.icon" />
+        <div><b>{{ salesSemantic.title }}</b><span>{{ salesSemantic.hint }}</span></div>
+      </div>
+      <div class="focus-steps">
+        <span v-for="(step, index) in salesSemantic.steps" :key="step"><em>{{ index + 1 }}</em>{{ step }}</span>
       </div>
     </section>
 
@@ -39,7 +48,16 @@
         <el-row :gutter="16">
           <el-col v-for="field in visibleFilters" :key="field.key" :xl="4" :lg="6" :md="8" :sm="12" :xs="24">
             <el-form-item :label="field.label">
-              <el-input v-if="field.type === 'input'" v-model.trim="filters[field.key]" clearable :placeholder="`请输入${field.label}`" @keyup.enter.native="search" />
+              <el-input
+                v-if="field.type === 'input'"
+                v-model.trim="filters[field.key]"
+                clearable
+                :maxlength="field.maxLength || (isMobileField(field) ? 11 : 100)"
+                :inputmode="field.inputMode || (isMobileField(field) ? 'numeric' : undefined)"
+                :placeholder="`请输入${field.label}`"
+                @input="handleFilterInput(field, $event)"
+                @keyup.enter.native="search"
+              />
               <el-select
                 v-else-if="field.type === 'select'"
                 v-model="filters[field.key]"
@@ -92,7 +110,7 @@
       </div>
 
       <el-table v-loading="loading" :data="pagedRows" border stripe height="520" highlight-current-row @selection-change="selection = $event">
-        <el-table-column v-if="visibleActions.length" type="selection" width="45" fixed="left" />
+        <el-table-column v-if="visibleActions.length" type="selection" width="45" fixed="left" :selectable="rowSelectable" />
         <el-table-column v-if="config.lineColumns" type="expand" width="44" fixed="left">
           <template slot-scope="scope">
             <div class="expand-panel">
@@ -119,12 +137,13 @@
         <el-table-column label="操作" width="155" fixed="right">
           <template slot-scope="scope">
             <el-button type="text" @click="openDetails(scope.row)">详情</el-button>
-            <el-button v-if="canUseAction('编辑')" type="text" @click="openEdit(scope.row)">编辑</el-button>
+            <el-button v-if="pageTitle === '合同管理'" type="text" @click="runContractNext(scope.row)">{{ contractNextAction(scope.row) }}</el-button>
+            <el-button v-if="canUseAction('编辑') && !scope.row.catalogOnly" type="text" @click="openEdit(scope.row)">编辑</el-button>
             <el-dropdown v-if="canUseAction('打印') || canUseAction('删除')" trigger="click" @command="command => handleRowCommand(command, scope.row)">
               <span class="more-link">更多<i class="el-icon-arrow-down" /></span>
               <el-dropdown-menu slot="dropdown">
                 <el-dropdown-item v-if="canUseAction('打印')" command="print">打印单据</el-dropdown-item>
-                <el-dropdown-item v-if="canUseAction('删除')" command="delete" divided>删除</el-dropdown-item>
+                <el-dropdown-item v-if="canUseAction('删除') && !scope.row.catalogOnly" command="delete" divided>删除</el-dropdown-item>
               </el-dropdown-menu>
             </el-dropdown>
           </template>
@@ -132,7 +151,8 @@
       </el-table>
 
       <div v-if="pageTitle === '合同管理'" class="contract-summary">
-        <strong>合同汇总</strong>
+        <strong>合同履约闭环</strong>
+        <span>合同汇总</span>
         <span>成交金额 <b>¥ {{ money(contractSummary.dealAmount) }}</b></span>
         <span>已收款 <b>¥ {{ money(contractSummary.receivedAmount) }}</b></span>
         <span>退款 <b>¥ {{ money(contractSummary.refundAmount) }}</b></span>
@@ -154,8 +174,16 @@
             <el-row :gutter="18">
               <el-col v-for="field in dialogFields" :key="field.key" :span="field.type === 'textarea' ? 24 : 12">
                 <el-form-item :label="field.label" :required="field.required">
-                  <el-input v-if="field.type === 'input'" v-model.trim="recordForm[field.key]" :placeholder="`请输入${field.label}`" />
-                  <el-input v-else-if="field.type === 'textarea'" v-model.trim="recordForm[field.key]" type="textarea" :rows="3" :placeholder="`请输入${field.label}`" />
+                  <el-input
+                    v-if="field.type === 'input'"
+                    v-model.trim="recordForm[field.key]"
+                    :readonly="field.readonly"
+                    :maxlength="field.maxLength || (isMobileField(field) ? 11 : 100)"
+                    :inputmode="field.inputMode || (isMobileField(field) ? 'numeric' : undefined)"
+                    :placeholder="field.readonly ? '' : `请输入${field.label}`"
+                    @input="handleDialogInput(field, $event)"
+                  />
+                  <el-input v-else-if="field.type === 'textarea'" v-model.trim="recordForm[field.key]" type="textarea" :rows="3" :maxlength="field.maxLength || 500" show-word-limit :placeholder="`请输入${field.label}`" />
                   <el-select
                     v-else-if="field.type === 'select'"
                     v-model="recordForm[field.key]"
@@ -166,10 +194,15 @@
                     class="full-control"
                     @change="handleDialogFieldChange(field)"
                   >
-                    <el-option v-for="option in dialogFieldOptions(field)" :key="option" :label="option" :value="option" />
+                    <el-option
+                      v-for="option in dialogFieldOptions(field)"
+                      :key="option.value || option"
+                      :label="option.label || option"
+                      :value="option.value || option"
+                    />
                   </el-select>
                   <el-date-picker v-else-if="field.type === 'date'" v-model="recordForm[field.key]" :type="field.dateType || 'date'" value-format="yyyy-MM-dd HH:mm:ss" placeholder="请选择" class="full-control" />
-                  <el-input-number v-else-if="field.type === 'number'" v-model="recordForm[field.key]" :min="0" :precision="field.precision" controls-position="right" class="full-control" @change="recalculateLines" />
+                  <el-input-number v-else-if="field.type === 'number'" v-model="recordForm[field.key]" :min="field.min === undefined ? 0 : field.min" :max="field.max === undefined ? 99999999 : field.max" :precision="field.precision" controls-position="right" class="full-control" @change="recalculateLines" />
                   <el-switch v-else-if="field.type === 'switch'" v-model="recordForm[field.key]" active-text="是" inactive-text="否" />
                 </el-form-item>
               </el-col>
@@ -223,8 +256,9 @@ import { getSalesPageConfig } from '@/config/sales-pages'
 import { canUseSalesAction, visibleSalesActions } from '@/config/sales-permissions'
 import { auditSalesModuleRecord, getSalesModuleData, performSalesModuleAction, saveSalesModuleRecord } from '@/api/erp-sales'
 
-const inputField = (key, label, required = false) => ({ key, label, type: 'input', required })
-const textareaField = (key, label, required = false) => ({ key, label, type: 'textarea', required })
+const inputField = (key, label, required = false, rules = {}) => ({ key, label, type: 'input', required, ...rules })
+const numberField = (key, label, required = false, precision = 0, min = 0, max = 99999999) => ({ key, label, type: 'number', required, precision, min, max })
+const textareaField = (key, label, required = false, maxLength = 500) => ({ key, label, type: 'textarea', required, maxLength })
 const selectField = (key, label, options, required = false) => ({ key, label, type: 'select', options, required })
 
 export default {
@@ -237,6 +271,7 @@ export default {
       filters: {},
       storeScope: '全部',
       storeOptions: [],
+      packageCatalog: [],
       rows: [],
       selection: [],
       activeStatus: '全部',
@@ -251,16 +286,36 @@ export default {
       recordForm: {},
       lineItems: [],
       currentRow: null,
-      drawerVisible: false
+      drawerVisible: false,
+      activePageTitle: '',
+      activePageConfig: null,
+      loadRequestId: 0
     }
   },
   computed: {
-    ...mapGetters(['permissions', 'roles']),
+    ...mapGetters(['permissions', 'roles', 'currentStoreId']),
+    hasConcreteStore() { return this.currentStoreId && String(this.currentStoreId) !== 'all' },
+    selectedStoreName() {
+      const store = this.storeOptions.find(item => String(item.id) === String(this.currentStoreId))
+      return store ? store.name : ''
+    },
     pageTitle() {
-      return this.$route.meta.title
+      return this.activePageTitle || this.resolvePageTitle(this.$route)
+    },
+    dataScopeLabel() {
+      return this.pageTitle === '套餐管理' ? '甲方套餐价目表' : '实时业务数据'
     },
     config() {
-      return getSalesPageConfig(this.pageTitle)
+      return this.activePageConfig || getSalesPageConfig(this.pageTitle)
+    },
+    salesSemantic() {
+      const semantics = {
+        contracts: { mode: 'contract', icon: 'el-icon-document-checked', title: '合同履约链路', hint: '围绕客户签约与履约状态办理，不在本页维护套餐目录。', steps: ['选择门店与客户', '选择套餐或填写合同约定', '提交审核', '收款与订房衔接'] },
+        packages: { mode: 'package', icon: 'el-icon-box', title: '套餐目录与价格版本', hint: '维护门店可选套餐、入住天数与价格，不产生客户合同。', steps: ['选择所属门店', '选择套餐目录', '维护价格版本', '审核并启用'] },
+        'card-packages': { mode: 'card', icon: 'el-icon-bank-card', title: '套餐卡与次卡规则', hint: '维护卡类权益、有效期和次数；会员持卡与核销在会员资产中留痕。', steps: ['设置卡类型', '配置权益与次数', '启用卡规则', '发卡后核销'] },
+        'electronic-contract-archives': { mode: 'esign', icon: 'el-icon-finished', title: '电子签署与归档', hint: '只记录签署申请和归档状态；签署通道未启用时不会显示为签署成功。', steps: ['选择线下合同', '选择合同模板', '发起签署申请', '回传并归档'] }
+      }
+      return semantics[this.config.key] || { mode: 'sales', icon: 'el-icon-shopping-cart-full', title: '销售业务处理', hint: '当前页面使用本功能专属字段、状态和操作。', steps: ['筛选业务记录', '新增或编辑', '提交业务处理', '查询并导出'] }
     },
     visibleActions() {
       return visibleSalesActions(
@@ -285,7 +340,7 @@ export default {
         '合同管理': ['全部', '待完善', '待提交', '待审核', '审核通过', '合同已结束', '合同中途结束', '驳回', '合同已作废'],
         '商品销售': ['全部', '未支付', '已支付', '已取消', '已付未出库', '已出库', '已出库未支付', '换货退货'],
         '套餐管理': ['全部', '未提交', '审核中', '已启用', '已推荐'],
-        '优惠管理': ['全部', '待审核', '未使用', '已使用', '已过期', '已停用'],
+        '优惠管理': ['全部', '待审核', '未使用', '部分使用', '已核销', '已过期', '已停用'],
         '赠送项目申请': ['全部', '未提交', '审核中', '待出库', '已出库', '已退货']
       }
       return pipelines[this.pageTitle] || []
@@ -306,10 +361,17 @@ export default {
       const entries = Object.entries(this.filters).filter(([, value]) => value !== '' && value !== null && (!Array.isArray(value) || value.length))
       if (!entries.length) return data
       return data.filter(row => entries.every(([key, value]) => {
-        if (Array.isArray(value)) return true
+        const field = this.config.filters.find(item => item.key === key)
+        if (Array.isArray(value)) {
+          const rowDate = this.rowDateForFilter(row, key)
+          if (!rowDate) return false
+          return rowDate >= value[0] && rowDate <= value[1]
+        }
         if (key === 'checkedIn') return value === '已入住' ? row.checkedIn === '是' : row.checkedIn === '否'
         if (key === 'contractType' && value === '月子合同') return row.contractType === '月子护理'
-        return String(row[key] || row.customerName || row.saleNo || '').includes(String(value))
+        const rowValue = row[key]
+        if (field && field.type === 'select') return String(rowValue || '') === String(value)
+        return String(rowValue || '').includes(String(value))
       }))
     },
     pagedRows() {
@@ -352,14 +414,33 @@ export default {
     }
   },
   watch: {
-    '$route.meta.title': {
-      immediate: true,
-      handler() {
-        this.initializePage()
-      }
-    }
+    currentStoreId() { this.initializePage() }
+  },
+  created() {
+    this.activateRoute(this.$route)
+  },
+  beforeRouteUpdate(to, from, next) {
+    next()
+    this.$nextTick(() => this.activateRoute(to))
   },
   methods: {
+    resolvePageTitle(route) {
+      const meta = (route && route.meta) || {}
+      return meta.configTitle || meta.title || '合同管理'
+    },
+    activateRoute(route) {
+      const pageTitle = this.resolvePageTitle(route)
+      this.activePageTitle = pageTitle
+      this.activePageConfig = getSalesPageConfig(pageTitle)
+      this.loadRequestId += 1
+      this.rows = []
+      this.selection = []
+      this.packageCatalog = []
+      this.dialogVisible = false
+      this.drawerVisible = false
+      this.currentRow = null
+      this.initializePage()
+    },
     canUseAction(action) {
       return canUseSalesAction(
         this.config.key,
@@ -376,18 +457,29 @@ export default {
       Object.entries(this.config.defaultFilters || {}).forEach(([key, value]) => { this.$set(this.filters, key, value) })
       if (this.pageTitle === '合同管理') this.$set(this.filters, 'signedRange', this.recentDateRange())
       this.storeScope = '全部'
+      this.applyRouteStore()
       this.activeStatus = '全部'
       this.filtersExpanded = false
       this.pagination.page = 1
       this.loadData()
     },
     async loadData() {
+      const requestId = ++this.loadRequestId
+      const pageKey = this.config.key
+      if (this.config.integrationOnly) {
+        this.rows = []
+        this.storeOptions = []
+        this.loading = false
+        return
+      }
       this.loading = true
       try {
         const params = { ...this.filters }
+        params.storeId = this.currentStoreId || 'all'
         if (this.storeScope && this.storeScope !== '全部') params.store = this.storeScope
         if (this.activeStatus && this.activeStatus !== '全部') params.status = this.activeStatus
-        const response = await getSalesModuleData(this.config.key, params)
+        const response = await getSalesModuleData(pageKey, params)
+        if (requestId !== this.loadRequestId || pageKey !== this.config.key) return
         this.rows = response.data.list || []
         this.storeOptions = response.data.stores || []
         ;['store', 'stayStore'].forEach(key => {
@@ -398,8 +490,9 @@ export default {
         if (this.storeScope !== '全部' && !this.storeOptions.some(item => item.name === this.storeScope)) {
           this.storeScope = '全部'
         }
+        this.applyRouteStore()
       } finally {
-        this.loading = false
+        if (requestId === this.loadRequestId) this.loading = false
       }
     },
     async search() {
@@ -412,6 +505,7 @@ export default {
       Object.entries(this.config.defaultFilters || {}).forEach(([key, value]) => { this.filters[key] = value })
       if (this.pageTitle === '合同管理') this.filters.signedRange = this.recentDateRange()
       this.storeScope = '全部'
+      this.applyRouteStore()
       this.activeStatus = '全部'
       this.pagination.page = 1
     },
@@ -443,23 +537,74 @@ export default {
         })
     },
     dialogFieldOptions(field) {
+      if (field.key === 'store') return this.selectedStoreName ? [this.selectedStoreName] : []
+      if (field.catalogSelector === 'package') {
+        const store = this.recordForm.store
+        const seen = new Set()
+        return this.packageCatalog
+          .filter(row => this.storeMatches(store, row.store))
+          .filter(row => {
+            const key = `${row.basePackageName || row.packageName}|${row.packageDays || row.validDays}`
+            if (seen.has(key)) return false
+            seen.add(key)
+            return true
+          })
+          .map(row => ({
+            value: String(row.selectionKey || row.id),
+            label: `${row.packageDisplayName || row.basePackageName || row.packageName} · ${row.packageDays || row.validDays}天 · ¥${Number(row.dealPrice || row.packageAmount || 0).toLocaleString('zh-CN')}`,
+            row
+          }))
+      }
       if (!field.optionsByDependency) return field.options || []
       return field.optionsByDependency[this.recordForm[field.dependsOn]] || []
     },
     dialogFieldDisabled(field) {
+      if (field.catalogSelector === 'package') return !this.recordForm.store || !this.dialogFieldOptions(field).length
       return Boolean(field.optionsByDependency && !this.dialogFieldOptions(field).length)
     },
     dialogFieldPlaceholder(field) {
+      if (field.catalogSelector === 'package') {
+        if (!this.recordForm.store) return '请先选择门店'
+        return this.dialogFieldDisabled(field) ? '当前门店暂无可用套餐' : '请选择套餐版本'
+      }
       if (!field.dependsOn) return '请选择'
       const dependency = this.dialogFields.find(item => item.key === field.dependsOn)
       return this.dialogFieldDisabled(field) ? `请先选择${dependency ? dependency.label : '上级类型'}` : '请选择'
     },
     handleDialogFieldChange(field) {
+      if (field.catalogSelector === 'package') {
+        const selected = this.dialogFieldOptions(field).find(item => String(item.value) === String(this.recordForm[field.key]))
+        if (selected) this.applyPackageCatalogSelection(selected.row)
+      }
       this.dialogFields
         .filter(item => item.dependsOn === field.key)
         .forEach(item => {
-          if (!this.dialogFieldOptions(item).includes(this.recordForm[item.key])) this.recordForm[item.key] = ''
+          const options = this.dialogFieldOptions(item)
+          const values = options.map(option => option && option.value !== undefined ? option.value : option)
+          if (!values.includes(this.recordForm[item.key])) this.recordForm[item.key] = ''
         })
+    },
+    async refreshPackageCatalog() {
+      if (!this.hasConcreteStore) {
+        this.packageCatalog = []
+        return
+      }
+      const response = await getSalesModuleData('packages', { storeId: this.currentStoreId })
+      this.packageCatalog = (response.data.list || []).filter(row => this.storeMatches(this.selectedStoreName, row.store))
+    },
+    applyPackageCatalogSelection(row) {
+      const packageName = row.basePackageName || row.packageName || ''
+      const days = Number(row.packageDays || row.validDays || 0)
+      this.$set(this.recordForm, 'basePackageName', packageName)
+      this.$set(this.recordForm, 'packageName', packageName)
+      this.$set(this.recordForm, 'packageDays', days)
+      if (Object.prototype.hasOwnProperty.call(this.recordForm, 'nursingType')) this.recordForm.nursingType = row.nursingType || this.recordForm.nursingType
+      if (Object.prototype.hasOwnProperty.call(this.recordForm, 'contractDays')) this.recordForm.contractDays = days
+      if (Object.prototype.hasOwnProperty.call(this.recordForm, 'roomType')) this.recordForm.roomType = row.roomType || this.recordForm.roomType
+      if (Object.prototype.hasOwnProperty.call(this.recordForm, 'originalPrice')) this.recordForm.originalPrice = Number(row.originalPrice || 0)
+      if (Object.prototype.hasOwnProperty.call(this.recordForm, 'activityPrice')) this.recordForm.activityPrice = Number(row.activityPrice || row.originalPrice || 0)
+      if (Object.prototype.hasOwnProperty.call(this.recordForm, 'dealPrice')) this.recordForm.dealPrice = Number(row.dealPrice || row.packageAmount || 0)
+      if (Object.prototype.hasOwnProperty.call(this.recordForm, 'dealAmount')) this.recordForm.dealAmount = Number(row.dealPrice || row.packageAmount || 0)
     },
     storeMatches(requested, actual) {
       if (requested === actual) return true
@@ -468,6 +613,30 @@ export default {
         return String(actual).includes('中心广场') || String(actual).includes('建设路')
       }
       return false
+    },
+    routeStoreName() {
+      if (this.selectedStoreName) return this.selectedStoreName
+      const requested = String(this.$route.query.storeId || '')
+      const storeMap = { '1': '中心广场旗舰店', '2': '黄河路轻奢店' }
+      return storeMap[requested] || ''
+    },
+    applyRouteStore() {
+      const store = this.routeStoreName()
+      if (!store) return
+      if (this.config.storeOptions) this.storeScope = store
+      if (Object.prototype.hasOwnProperty.call(this.filters, 'store')) this.filters.store = store
+    },
+    rowDateForFilter(row, filterKey) {
+      const aliases = {
+        createdRange: ['createdAt'],
+        saleRange: ['saleDate', 'createdAt'],
+        signedRange: ['signedAt', 'signDate', 'createdAt'],
+        dueRange: ['dueDate'],
+        auditRange: ['auditedAt', 'createdAt']
+      }
+      const keys = aliases[filterKey] || [filterKey.replace(/Range$/, ''), 'createdAt']
+      const value = keys.map(key => row[key]).find(Boolean)
+      return value ? String(value).slice(0, 10) : ''
     },
     handleAction(action) {
       if (!this.canUseAction(action)) return this.$message.error('当前账号没有此操作权限')
@@ -494,16 +663,25 @@ export default {
       return row
     },
     openCreate(action) {
+      if (!this.hasConcreteStore) return this.$message.warning('全部门店仅支持汇总查询，请先选择具体门店再新增')
       this.dialogMode = 'create'
       this.dialogAction = action
       this.dialogTitle = `${action}${action === '添加' ? this.pageTitle : ''}`
       this.dialogFields = this.config.formFields
       this.recordForm = this.emptyForm(this.dialogFields)
+      const routeStore = this.routeStoreName()
+      if (routeStore && Object.prototype.hasOwnProperty.call(this.recordForm, 'store')) this.recordForm.store = routeStore
       if (action.includes('物料')) this.recordForm.saleType = '物料销售'
       if (action.includes('项目') || action.includes('服务')) this.recordForm.saleType = '项目销售'
       if (action.includes('卡类')) this.recordForm.saleType = '卡类销售'
       if (action.includes('膳食')) this.recordForm.saleType = '膳食销售'
       if (action.includes('赠送')) this.recordForm.giftType = '签单赠送'
+      if (this.dialogFields.some(field => field.catalogSelector === 'package')) {
+        this.refreshPackageCatalog().catch(() => {
+          this.packageCatalog = []
+          this.$message.error('套餐目录暂时无法加载，请刷新后重试')
+        })
+      }
       this.lineItems = this.config.lineColumns ? [this.createEditableLine()] : []
       this.dialogTab = 'base'
       this.currentRow = null
@@ -511,6 +689,8 @@ export default {
     },
     openEdit(row) {
       if (!row) return
+      if (row.catalogOnly) return this.$message.info('该记录来自甲方确认的标准套餐目录；如需销售配置，请点击“添加”并选择该套餐')
+      if (!this.hasConcreteStore) return this.$message.warning('全部门店仅支持汇总查询，请先选择具体门店再编辑')
       this.dialogMode = 'edit'
       this.dialogAction = '编辑'
       this.dialogTitle = `编辑${this.pageTitle}`
@@ -520,6 +700,18 @@ export default {
         this.$set(result, field.key, row[field.key] !== undefined ? row[field.key] : field.type === 'switch' ? false : field.type === 'number' ? 0 : '')
         return result
       }, {})
+      if (this.dialogFields.some(field => field.catalogSelector === 'package')) {
+        this.refreshPackageCatalog().then(() => {
+          const matched = this.packageCatalog.find(item => (
+            (item.basePackageName || item.packageName) === (row.basePackageName || row.packageName) &&
+            Number(item.packageDays || item.validDays) === Number(row.packageDays || row.contractDays || 0)
+          ))
+          if (matched) this.$set(this.recordForm, 'packageSelection', String(matched.selectionKey || matched.id))
+        }).catch(() => {
+          this.packageCatalog = []
+          this.$message.error('套餐目录暂时无法加载，请刷新后重试')
+        })
+      }
       this.lineItems = row.lineItems ? row.lineItems.map(item => ({ ...item })) : []
       this.dialogTab = 'base'
       this.dialogVisible = true
@@ -549,7 +741,9 @@ export default {
       this.dialogVisible = true
     },
     operationFields(action) {
-      if (action === '分发') return [inputField('documentName', '优惠券'), inputField('customerName', '客户姓名', true), inputField('mobile', '手机号', true), inputField('quantity', '发放数量', true), textareaField('remark', '发放说明')]
+      if (action === '分发') return [inputField('documentName', '优惠券', false, { readonly: true, maxLength: 80 }), inputField('customerName', '客户姓名', true, { maxLength: 30 }), inputField('mobile', '手机号', true, { format: 'mobile', inputMode: 'numeric', maxLength: 11 }), numberField('quantity', '发放数量', true, 0, 1, 100), textareaField('remark', '发放说明')]
+      if (action === '核销') return [inputField('documentName', '客户优惠券', false, { readonly: true, maxLength: 80 }), inputField('saleNo', '关联业务单号', true, { maxLength: 64 }), numberField('consumeAmount', '本次核销金额', true, 2, 0.01, 1000000), textareaField('remark', '核销说明', true)]
+      if (action === '停用') return [inputField('documentName', '客户优惠券', false, { readonly: true, maxLength: 80 }), textareaField('disableReason', '停用原因', true)]
       if (action === '变更' || action === '合同变更') return [inputField('documentName', '合同编号'), selectField('changeType', '变更类型', ['入住日期变更', '房型变更', '套餐变更', '合同金额变更', '签单信息变更'], true), inputField('effectiveDate', '生效日期', true), textareaField('changeReason', '变更原因', true)]
       if (action === '作废') return [inputField('documentName', '合同编号'), inputField('invalidDate', '作废日期', true), textareaField('invalidReason', '作废原因', true)]
       if (action === '设置' || action === '设置套餐') return [inputField('documentName', '合同编号'), inputField('packageName', '套餐名称', true), inputField('packageDays', '套餐天数', true), inputField('packageAmount', '套餐金额', true), textareaField('remark', '设置说明')]
@@ -562,6 +756,22 @@ export default {
       if (/出库|退货/.test(action)) return [inputField('documentName', '业务单据'), selectField('warehouse', '业务仓库', ['五楼总库', '销售部仓库', '产康部仓库'], true), inputField('operator', '经办人'), textareaField('remark', '处理说明')]
       if (action.includes('介绍分配')) return [inputField('documentName', '业务单据'), inputField('introducer', '介绍人', true), inputField('introducerMobile', '介绍电话'), textareaField('remark', '分配说明')]
       return [inputField('documentName', '业务单据'), selectField('result', '处理结果', ['确认执行', '暂缓处理', '退回修改'], true), textareaField('remark', '操作说明')]
+    },
+    isMobileField(field) {
+      return Boolean(field && (field.format === 'mobile' || /mobile|phone/i.test(String(field.key || ''))))
+    },
+    normalizeFieldInput(field, value) {
+      const text = String(value === undefined || value === null ? '' : value)
+      if (this.isMobileField(field)) return text.replace(/\D/g, '').slice(0, 11)
+      return field && field.maxLength ? text.slice(0, field.maxLength) : text
+    },
+    handleFilterInput(field, value) {
+      const normalized = this.normalizeFieldInput(field, value)
+      if (normalized !== value) this.$set(this.filters, field.key, normalized)
+    },
+    handleDialogInput(field, value) {
+      const normalized = this.normalizeFieldInput(field, value)
+      if (normalized !== value) this.$set(this.recordForm, field.key, normalized)
     },
     emptyForm(fields) {
       return fields.reduce((result, field) => {
@@ -584,19 +794,44 @@ export default {
       if (Object.prototype.hasOwnProperty.call(this.recordForm, 'packageAmount') && this.pageTitle.includes('套餐')) this.recordForm.packageAmount = this.lineAmount
     },
     async saveRecord(submit) {
+      if (!this.hasConcreteStore) return this.$message.warning('全部门店仅支持汇总查询，请先选择具体门店再保存')
       const missing = this.dialogFields.find(field => field.required && (this.recordForm[field.key] === '' || this.recordForm[field.key] === null))
       if (missing) return this.$message.warning(`请填写${missing.label}`)
+      const invalidPhone = this.dialogFields.find(field => this.isMobileField(field) && this.recordForm[field.key] && !/^1[3-9]\d{9}$/.test(String(this.recordForm[field.key])))
+      if (invalidPhone) return this.$message.warning(`${invalidPhone.label}须为中国大陆 11 位手机号`)
+      const invalidLength = this.dialogFields.find(field => field.maxLength && String(this.recordForm[field.key] || '').length > field.maxLength)
+      if (invalidLength) return this.$message.warning(`${invalidLength.label}不能超过 ${invalidLength.maxLength} 个字符`)
+      const invalidNumber = this.dialogFields.find(field => field.type === 'number' && this.recordForm[field.key] !== '' && (Number(this.recordForm[field.key]) < field.min || Number(this.recordForm[field.key]) > field.max))
+      if (invalidNumber) return this.$message.warning(`${invalidNumber.label}须在 ${invalidNumber.min} 至 ${invalidNumber.max} 之间`)
+      if (Object.prototype.hasOwnProperty.call(this.recordForm, 'quantity') && (!Number.isInteger(Number(this.recordForm.quantity)) || Number(this.recordForm.quantity) <= 0)) return this.$message.warning('发放数量必须为大于 0 的整数')
+      if (Object.prototype.hasOwnProperty.call(this.recordForm, 'consumeAmount') && Number(this.recordForm.consumeAmount) <= 0) return this.$message.warning('核销金额必须大于 0')
+      if (this.recordForm.startsAt && this.recordForm.endsAt && String(this.recordForm.endsAt).slice(0, 10) < String(this.recordForm.startsAt).slice(0, 10)) return this.$message.warning('优惠结束时间不能早于开始时间')
+      const today = new Date().toISOString().slice(0, 10)
+      if (this.dialogMode === 'create' && this.recordForm.startsAt && String(this.recordForm.startsAt).slice(0, 10) < today) return this.$message.warning('优惠开始时间不能早于今天')
+      if (this.recordForm.endsAt && String(this.recordForm.endsAt).slice(0, 10) < today) return this.$message.warning('优惠结束时间不能早于今天')
+      if (this.pageTitle === '优惠券管理' && Number(this.recordForm.limitPerCustomer) > Number(this.recordForm.totalQuantity)) return this.$message.warning('单客户限领数量不能大于优惠券总数量')
+      if (this.pageTitle === '优惠券管理' && this.currentRow && Number(this.recordForm.totalQuantity) < Number(this.currentRow.issuedQuantity || 0)) return this.$message.warning('优惠券总数量不能小于已发放数量')
+      if (this.pageTitle === '套餐管理') {
+        const days = Number(this.recordForm.packageDays)
+        const original = Number(this.recordForm.originalPrice)
+        const activity = Number(this.recordForm.activityPrice)
+        const deal = Number(this.recordForm.dealPrice)
+        if (!Number.isInteger(days) || days <= 0) return this.$message.warning('套餐天数必须是大于 0 的整数')
+        if (original <= 0 || activity <= 0 || deal <= 0) return this.$message.warning('套餐原价、活动价和成交价必须大于 0')
+        if (original < activity || activity < deal) return this.$message.warning('价格必须满足：原价 ≥ 活动价 ≥ 成交价')
+        if (!this.recordForm.store) return this.$message.warning('套餐必须选择所属门店')
+      }
       if (this.config.lineColumns && this.dialogMode !== 'audit' && this.dialogMode !== 'operation' && !this.lineItems.length) return this.$message.warning(`请至少添加一条${this.lineTitle}`)
       this.saving = true
       try {
         if (this.dialogMode === 'audit') {
-          await auditSalesModuleRecord(this.config.key, { ...this.recordForm, action: this.dialogAction, ids: this.selection.map(row => row.id) })
-          this.selection.forEach(row => { if (row.auditStatus !== undefined) row.auditStatus = this.recordForm.auditResult === '通过' ? '审核通过' : '审核不通过' })
+          await auditSalesModuleRecord(this.config.key, { ...this.recordForm, action: this.dialogAction, ids: this.selection.map(row => row.id), selectedStoreId: this.currentStoreId })
+          this.selection.forEach(row => { if (row.auditStatus !== undefined) row.auditStatus = ['通过', '审核通过'].includes(this.recordForm.auditResult) ? '已通过' : '审核不通过' })
         } else if (this.dialogMode === 'operation') {
-          await performSalesModuleAction(this.config.key, this.dialogAction, { ...this.recordForm, ids: this.selection.map(row => row.id) })
+          await performSalesModuleAction(this.config.key, this.dialogAction, { ...this.recordForm, ids: this.selection.map(row => row.id), selectedStoreId: this.currentStoreId })
           this.applyActionStatus(this.dialogAction)
         } else {
-          await saveSalesModuleRecord(this.config.key, { ...this.recordForm, lineItems: this.lineItems, submit, id: this.currentRow && this.currentRow.id })
+          await saveSalesModuleRecord(this.config.key, { ...this.recordForm, lineItems: this.lineItems, submit, id: this.currentRow && this.currentRow.id, selectedStoreId: this.currentStoreId })
           await this.loadData()
         }
         if (this.dialogMode === 'audit' || this.dialogMode === 'operation') await this.loadData()
@@ -617,6 +852,7 @@ export default {
     },
     async removeRows(rows = this.selection) {
       if (!rows.length) return this.$message.warning('请先选择要删除的记录')
+      if (rows.some(row => row.catalogOnly)) return this.$message.warning('标准套餐目录为只读数据，不能通过销售套餐列表删除')
       try {
         await this.$confirm(`确认删除选中的 ${rows.length} 条记录吗？操作会保留审计轨迹。`, '删除确认', { type: 'warning' })
         await performSalesModuleAction(this.config.key, '删除', { ids: rows.map(row => row.id) })
@@ -636,6 +872,25 @@ export default {
       this.currentRow = row
       this.drawerVisible = true
     },
+    rowSelectable(row) {
+      return !row.catalogOnly
+    },
+    contractNextAction(row) {
+      const status = String(row.auditStatus || row.status || '')
+      if (status.includes('待')) return '进入签约办理'
+      if (status.includes('已入住')) return '查看入住推进'
+      return '推进履约'
+    },
+    runContractNext(row) {
+      this.$router.push({
+        path: '/customer/signing-workbench',
+        query: {
+          customerId: row.customerId || row.customer_id || '',
+          contractId: row.id || '',
+          storeId: this.currentStoreId || ''
+        }
+      })
+    },
     displayName(row) {
       return row.contractNo || row.saleNo || row.applicationNo || row.packageName || row.cardName || row.listName || row.couponName || row.id
     },
@@ -644,7 +899,7 @@ export default {
     },
     exportRows() {
       const header = this.config.columns.map(column => column.label)
-      const body = this.filteredRows.map(row => this.config.columns.map(column => String(row[column.key] || '').replace(/"/g, '""')))
+      const body = this.filteredRows.map(row => this.config.columns.map(column => String(row[column.key] === undefined || row[column.key] === null ? '' : row[column.key]).replace(/"/g, '""')))
       const csv = [header, ...body].map(line => line.map(value => `"${value}"`).join(',')).join('\n')
       const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' })
       const link = document.createElement('a')
@@ -729,15 +984,31 @@ export default {
 
 <style lang="scss" scoped>
 .sales-workbench { min-height: calc(100vh - 84px); padding: 22px; color: #26354c; background: #f3f6fa; }
-.hero-panel { display: flex; justify-content: space-between; align-items: center; gap: 28px; padding: 26px 30px; border-radius: 16px; color: white; background: linear-gradient(125deg, #382262 0%, #6f3e82 55%, #b25b6c 100%); box-shadow: 0 14px 34px rgba(74, 40, 92, .2); }
-.eyebrow { margin-bottom: 9px; color: #ffd7df; font-size: 13px; font-weight: 700; letter-spacing: .7px; }
+.hero-panel { display: flex; justify-content: space-between; align-items: center; gap: 28px; padding: 26px 30px; border-radius: 16px; color: white; background: linear-gradient(125deg, #28241e 0%, #5f4b2d 56%, #a68045 100%); box-shadow: 0 14px 34px rgba(74, 55, 26, .2); }
+.eyebrow { margin-bottom: 9px; color: #f3dfb7; font-size: 13px; font-weight: 700; letter-spacing: .7px; }
 .hero-panel h1 { margin: 0 0 9px; font-size: 27px; }
-.hero-panel p { max-width: 760px; margin: 0; color: #eadfeb; font-size: 14px; line-height: 1.7; }
+.hero-panel p { max-width: 760px; margin: 0; color: #f7efe0; font-size: 14px; line-height: 1.7; }
 .hero-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; }
+.package-source-alert { margin-top: 16px; border-radius: 10px; }
+.sales-focus-panel { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 16px; padding: 16px 20px; border: 1px solid #eadfcb; border-left: 4px solid #b58a45; border-radius: 12px; background: #fffdf8; }
+.focus-heading { display: flex; min-width: 250px; align-items: center; gap: 12px; }
+.focus-heading > i { color: #aa7d38; font-size: 24px; }
+.focus-heading b, .focus-heading span { display: block; }
+.focus-heading b { color: #26364a; font-size: 15px; }
+.focus-heading span { margin-top: 4px; color: #7b8797; font-size: 12px; line-height: 1.5; }
+.focus-steps { display: flex; flex: 1; justify-content: flex-end; gap: 8px; }
+.focus-steps span { display: flex; align-items: center; gap: 6px; padding: 8px 11px; color: #5f6b7a; font-size: 12px; white-space: nowrap; border-radius: 8px; background: #f7f2e8; }
+.focus-steps em { display: grid; width: 20px; height: 20px; place-items: center; color: #fff; font-style: normal; border-radius: 50%; background: #b58a45; }
+.focus-package { border-left-color: #5e9dab; background: #f8fcfc; }
+.focus-package .focus-heading > i, .focus-package .focus-steps em { color: #fff; background: #5e9dab; }
+.focus-card { border-left-color: #7b6aac; background: #fbfaff; }
+.focus-card .focus-heading > i, .focus-card .focus-steps em { color: #fff; background: #7b6aac; }
+.focus-esign { border-left-color: #4f9b79; background: #f8fcfa; }
+.focus-esign .focus-heading > i, .focus-esign .focus-steps em { color: #fff; background: #4f9b79; }
 .metric-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 16px; overflow: hidden; border: 1px solid #e4e8ef; border-radius: 12px; background: #e4e8ef; }
 .metric-item { padding: 18px 22px; background: white; }
 .metric-item span { display: block; color: #718096; font-size: 12px; }
-.metric-item strong { display: block; margin: 7px 0 4px; color: #5e376d; font-size: 24px; }
+.metric-item strong { display: block; margin: 7px 0 4px; color: #8c6a36; font-size: 24px; }
 .metric-item small { color: #9aa6b4; }
 .status-pipeline { display: flex; gap: 8px; margin-top: 14px; overflow-x: auto; }
 .status-pipeline button { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; padding: 9px 13px; border: 1px solid #e0e5ec; border-radius: 9px; color: #637086; background: white; cursor: pointer; }

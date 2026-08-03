@@ -2,15 +2,23 @@
   <div class="finance-workbench">
     <section class="hero-panel">
       <div>
-        <div class="eyebrow"><i :class="config.icon" /> 财务管理 · 原 ERP 字段级复刻</div>
+        <div class="eyebrow"><i :class="config.icon" /> 财务管理</div>
         <h1>{{ pageTitle }}</h1>
         <p>{{ config.description }}</p>
       </div>
       <div class="hero-actions">
-        <el-tag type="success" effect="plain"><i class="el-icon-circle-check" /> 字段已核对</el-tag>
         <el-button v-if="config.mode !== 'form'" icon="el-icon-refresh" :loading="loading" @click="loadData">刷新</el-button>
       </div>
     </section>
+
+    <el-alert
+      v-if="isAllStores"
+      title="当前选择“全部门店”：财务明细、客户/合同选择和新增编辑均已暂停。请在右上角选择具体门店；全部门店仅用于汇总查询。"
+      type="warning"
+      :closable="false"
+      show-icon
+      class="store-scope-alert"
+    />
 
     <section class="metric-strip">
       <div v-for="(metric, index) in metrics" :key="metric.label" class="metric-item">
@@ -20,9 +28,25 @@
       </div>
     </section>
 
+    <section v-if="config.presentation === 'ledger'" class="finance-view-panel ledger-view">
+      <div class="view-title"><i class="el-icon-collection-tag" /><div><b>账务处理台</b><span>先筛选门店和日期，再对已保存单据执行审核、核销或对账。</span></div></div>
+      <div class="view-rule"><i class="el-icon-circle-check" /> 当前页面只处理已落库单据；外部渠道未接入时，不会生成支付或对账成功结果。</div>
+      <div class="view-stats"><span>当前台账 <b>{{ rows.length }}</b> 笔</span><span>已选单据 <b>{{ selection.length }}</b> 笔</span><span>可执行操作 <b>{{ visibleActions.length }}</b> 项</span></div>
+    </section>
+
+    <section v-if="config.presentation === 'approval'" class="finance-view-panel approval-view">
+      <div class="view-title"><i class="el-icon-s-check" /><div><b>退款与报销审批路径</b><span>退款申请、审核与实退登记分段留痕；费用报销仍由费用工作台独立处理。</span></div></div>
+      <div class="approval-path"><span>1 发起退款</span><i class="el-icon-right" /><span>2 审核</span><i class="el-icon-right" /><span>3 登记实退</span><i class="el-icon-right" /><span>4 留存审计记录</span></div>
+    </section>
+
+    <section v-if="config.presentation === 'analysis'" class="finance-view-panel analysis-view">
+      <div class="view-title"><i class="el-icon-data-analysis" /><div><b>统计口径</b><span>统计结果只来自当前门店范围和当前筛选结果；报表页面不直接改写业务单据。</span></div></div>
+      <div class="analysis-chips"><span v-for="metric in metrics" :key="`analysis-${metric.label}`"><b>{{ metric.label }}</b>{{ metric.money ? `¥ ${money(metric.value)}` : metric.value }}</span></div>
+    </section>
+
     <el-card v-if="config.mode === 'form'" shadow="never" class="content-card receipt-form-card">
       <div slot="header" class="card-heading">
-        <div><h2>收款单</h2><p>字段及下拉选项按原 ERP“新增收款”页面复刻</p></div>
+        <div><h2>收款单</h2><p>登记客户收款信息并提交财务审核</p></div>
         <el-tag type="warning" effect="plain">带 * 为必填项</el-tag>
       </div>
       <el-form ref="receiptForm" :model="receiptForm" label-position="top" class="record-form">
@@ -51,7 +75,7 @@
         <span v-for="tip in config.tips" :key="tip"><i class="el-icon-info" />{{ tip }}</span>
       </div>
       <div class="form-actions">
-        <el-button v-for="(action, index) in visibleActions" :key="action" :type="index === 0 ? 'primary' : 'default'" :loading="saving && index === 0" @click="handleReceiptAction(action)">{{ action }}</el-button>
+        <el-button v-for="(action, index) in visibleActions" :key="action" :type="index === 0 ? 'primary' : 'default'" :loading="saving && index === 0" :disabled="isAllStores && action !== '关闭'" @click="handleReceiptAction(action)">{{ action }}</el-button>
       </div>
     </el-card>
 
@@ -66,10 +90,23 @@
               :type="index === 0 ? 'primary' : 'default'"
               :plain="index !== 0"
               :icon="actionIcon(action)"
+              :disabled="isAllStores"
               @click="handleAction(action)"
             >{{ action }}</el-button>
           </div>
           <div class="selection-tip"><i class="el-icon-s-order" /> 已选 {{ selection.length }} 条 · 共 {{ filteredRows.length }} 条</div>
+        </div>
+      </el-card>
+
+      <el-card v-if="config.workflow" shadow="never" class="content-card workflow-card">
+        <div class="workflow-heading">
+          <div><h2>{{ config.workflow.title }}</h2><p>{{ config.workflow.description }}</p></div>
+          <el-button size="small" :type="workflowStatus ? 'primary' : 'default'" plain @click="setWorkflowStatus('')">查看全部</el-button>
+        </div>
+        <div class="workflow-steps">
+          <button v-for="(stage, index) in config.workflow.stages" :key="stage.status" type="button" :class="{ active: workflowStatus === stage.status }" @click="setWorkflowStatus(stage.status)">
+            <b>{{ index + 1 }}</b><span>{{ stage.label }}</span><em>{{ workflowCount(stage.status) }}</em>
+          </button>
         </div>
       </el-card>
 
@@ -126,7 +163,8 @@
           <el-table-column v-if="showOperationColumn" :label="operationColumnLabel" width="145" fixed="right">
             <template slot-scope="scope">
               <el-button type="text" @click="openDetails(scope.row)">详情</el-button>
-              <el-button v-if="config.auditFields" type="text" @click="openDialog('审核', config.auditFields, scope.row)">审核</el-button>
+              <el-button v-if="rowWorkflowAction(scope.row)" type="text" @click="runRowWorkflow(scope.row, rowWorkflowAction(scope.row))">{{ rowWorkflowAction(scope.row) }}</el-button>
+              <el-button v-else-if="config.auditFields" type="text" @click="openDialog('审核', config.auditFields, scope.row)">审核</el-button>
               <el-button v-else type="text" @click="openDetails(scope.row)">查看</el-button>
             </template>
           </el-table-column>
@@ -198,6 +236,7 @@ import { financePageConfigs, getFinancePageConfig } from '@/config/finance-pages
 import { getFinanceModuleData, getFinanceOptions, getFinancePickerData, performFinanceModuleAction, saveFinanceModuleRecord } from '@/api/erp-finance'
 
 const invoiceFields = [
+  { key: 'invoiceNo', label: '真实发票号码', type: 'input', required: true },
   { key: 'taxMode', label: '计税方式', type: 'radio', options: ['含税', '不含税'], required: true },
   { key: 'taxRate', label: '税率', type: 'select', options: ['3%'], required: true },
   { key: 'invoiceType', label: '发票类型', type: 'radio', options: ['增值税普通发票', '增值税专用发票'], required: true },
@@ -238,6 +277,21 @@ const pickerDefinitions = {
       { key: 'salesperson', label: '业务员', width: 110 },
       { key: 'store', label: '所属门店', width: 160 }
     ]
+  },
+  contract: {
+    title: '选择已审核合同',
+    tip: '合同类收款必须关联当前门店已审核合同；选择后自动回填客户、门店和合同剩余可收金额。',
+    placeholder: '请输入合同编号、客户姓名或手机号',
+    columns: [
+      { key: 'contractNo', label: '合同编号', width: 150 },
+      { key: 'customerName', label: '客户姓名', width: 120 },
+      { key: 'mobile', label: '手机号', width: 130 },
+      { key: 'store', label: '合同门店', width: 160 },
+      { key: 'amount', label: '合同金额', width: 110 },
+      { key: 'paid', label: '已登记收款', width: 110 },
+      { key: 'balance', label: '剩余可收', width: 110 },
+      { key: 'status', label: '合同状态', width: 100 }
+    ]
   }
 }
 
@@ -249,6 +303,7 @@ const financeNavIds = {
   欠款审核: 281,
   换货审核: 653,
   发票管理: 572,
+  交易对账: 90,
   部门物料预算: 251,
   我的费用: 317,
   费用审核: 607,
@@ -256,12 +311,13 @@ const financeNavIds = {
 }
 
 const financeActionButtonIds = {
-  收款管理: { 添加: 1, 星支付: 93, 开具发票: 120, 编辑: 10, 删除: 3, 导出: 19, 打印: 48, 审核: 21, 批量审核: 96, 核销: 60, 反审核: 49, 手续费: 125, 扫码支付: 137 },
-  退款申请: { 添加: 1, 编辑: 10, 删除: 3, 打印: 48, 提交: 58, 打款: 54, 导出: 19 },
-  退款审核: { 流程审批: 51, 反审核: 49, 撤回: 132 },
+  收款管理: { 前往新增收款: 1, 星支付: 93, 登记真实发票: 120, 编辑: 10, 删除: 3, 导出: 19, 打印: 48, 审核: 21, 批量审核: 96, 核销: 60, 反审核: 49, 手续费: 125, 扫码支付: 137 },
+  退款申请: { 添加: 1, 编辑: 10, 删除: 3, 打印: 48, 提交: 58, 导出: 19 },
+  退款审核: { 流程审批: 51, 登记退款打款: 54, 反审核: 49, 撤回: 132 },
   欠款审核: { 审核: 21 },
   换货审核: { 审核: 21, 删除: 3 },
   发票管理: { 导出: 19, 删除: 3 },
+  交易对账: { 添加: 1, 确认匹配: 21, 取消匹配: 49, 删除: 3, 导出: 19 },
   部门物料预算: { 添加: 1, 流程审批: 51, 编辑: 10, 删除: 3, 提交: 58, 生成采购计划: 59, 导出: 19 },
   我的费用: { 添加: 1, 编辑: 10, 删除: 3, 导出: 19, 打印: 48, 打款: 54, 反审核: 49, 提交: 58 },
   费用审核: { 流程审批: 51 },
@@ -294,7 +350,7 @@ const FieldControl = {
       ])
     }
     if (field.type === 'select') {
-      return h('el-select', { class: 'full-control', props: { value, clearable: true, filterable: true, placeholder: '请选择' }, on: { input: setValue }}, field.options.map(option => h('el-option', { key: option, props: { label: option, value: option }})))
+      return h('el-select', { class: 'full-control', props: { value, clearable: !field.disabled, disabled: Boolean(field.disabled), filterable: true, placeholder: '请选择' }, on: { input: setValue }}, field.options.map(option => h('el-option', { key: option, props: { label: option, value: option }})))
     }
     if (field.type === 'radio') {
       return h('el-radio-group', { props: { value }, on: { input: setValue }}, field.options.map(option => h('el-radio', { key: option, props: { label: option }}, option)))
@@ -345,31 +401,41 @@ export default {
       pickerKeyword: '',
       pickerRows: [],
       storeOptions: [],
-      activeBusinessTab: ''
+      activeBusinessTab: '',
+      workflowStatus: ''
     }
   },
   computed: {
-    ...mapGetters(['permissions', 'roles']),
+    ...mapGetters(['permissions', 'roles', 'currentStoreId']),
     pageTitle() {
-      return this.$route.meta.title
+      return String(this.$route.meta.title || '').replace(/\s*★\s*$/, '')
     },
     config() {
       return getFinancePageConfig(this.pageTitle)
+    },
+    financePermissionTitle() {
+      return this.config.permissionTitle || this.pageTitle
+    },
+    isAllStores() {
+      return String(this.currentStoreId || 'all') === 'all'
+    },
+    currentStore() {
+      return this.storeOptions.find(item => String(item.id) === String(this.currentStoreId)) || null
     },
     filterLimit() {
       return this.config.filterLimit || 8
     },
     visibleActions() {
       if ((this.roles || []).includes('SYS_ADMIN')) return this.config.actions
-      if (this.pageTitle === '新增收款') {
+      if (this.config.key === 'receipt-create') {
         return this.config.actions.filter(action => {
           if (action === '关闭') return true
           if (action === '保存') return (this.permissions || []).includes('FINANCE.CREATE')
           return false
         })
       }
-      const navId = financeNavIds[this.pageTitle]
-      const buttonMap = financeActionButtonIds[this.pageTitle] || {}
+      const navId = financeNavIds[this.financePermissionTitle]
+      const buttonMap = financeActionButtonIds[this.financePermissionTitle] || {}
       return this.config.actions.filter(action => {
         const buttonId = buttonMap[action]
         return buttonId && (this.permissions || []).includes(`LEGACY.WEB.N${navId}.B${buttonId}`)
@@ -380,11 +446,18 @@ export default {
     },
     filteredRows() {
       const entries = Object.entries(this.filters).filter(([, value]) => value !== '' && value !== null && value !== false && (!Array.isArray(value) || value.length))
-      if (!entries.length) return this.rows
-      return this.rows.filter(row => entries.every(([key, value]) => {
+      const scopedRows = this.workflowStatus
+        ? this.rows.filter(row => this.workflowRowStatus(row) === this.workflowStatus)
+        : this.rows
+      if (!entries.length) return scopedRows
+      return scopedRows.filter(row => entries.every(([key, value]) => {
         if (typeof value === 'boolean') return !value || !this.shouldExcludeRow(row, key)
         const field = this.config.filters.find(item => item.key === key)
-        if (field && field.type === 'dateRange') return true
+        if (field && field.type === 'dateRange') {
+          const rowDate = this.rowDateForRange(key, row)
+          if (!rowDate || value.length !== 2) return true
+          return rowDate >= value[0] && rowDate <= value[1]
+        }
         if (Array.isArray(value)) return value.includes('全部') || value.includes(row[key])
         if (value === '全部') return true
         return String(row[key] || '').includes(String(value))
@@ -457,11 +530,14 @@ export default {
     }
   },
   watch: {
-    '$route.meta.title': {
+    '$route.fullPath': {
       immediate: true,
       handler() {
         this.initializePage()
       }
+    },
+    currentStoreId() {
+      this.initializePage()
     }
   },
   methods: {
@@ -471,7 +547,7 @@ export default {
         this.receiptForm = this.emptyForm(this.config.formFields)
         this.receiptAttachments = []
         this.receiptForm.receiptKind = '收款单'
-        this.receiptForm.store = ''
+        this.applyCurrentStoreToReceipt()
         this.rows = []
         return
       }
@@ -485,13 +561,19 @@ export default {
       this.filtersExpanded = false
       this.pagination.page = 1
       this.selection = []
+      this.workflowStatus = ''
       this.loadData()
     },
     async loadData() {
+      if (this.isAllStores || this.config.integrationOnly) {
+        this.rows = []
+        return
+      }
       this.loading = true
       try {
         const response = await getFinanceModuleData(this.config.key, {
           ...this.filters,
+          storeId: this.currentStoreId,
           tab: this.activeBusinessTab || undefined
         })
         this.rows = response.data && Array.isArray(response.data.list) ? response.data.list : []
@@ -506,11 +588,9 @@ export default {
     },
     async loadFinanceOptions() {
       try {
-        const response = await getFinanceOptions()
+        const response = await getFinanceOptions({ storeId: this.currentStoreId })
         this.storeOptions = response.data && Array.isArray(response.data.stores) ? response.data.stores : []
-        if (this.config.mode === 'form' && !this.receiptForm.store && this.storeOptions.length === 1) {
-          this.$set(this.receiptForm, 'store', this.storeOptions[0].name)
-        }
+        if (this.config.mode === 'form') this.applyCurrentStoreToReceipt()
       } catch (error) {
         this.storeOptions = []
       }
@@ -521,7 +601,7 @@ export default {
     },
     resolvedField(field) {
       if (field.key !== 'store' || !this.storeOptions.length) return field
-      return { ...field, options: this.storeOptions.map(item => item.name) }
+      return { ...field, options: this.storeOptions.map(item => item.name), disabled: true }
     },
     emptyForm(fields) {
       return fields.reduce((result, field) => {
@@ -564,7 +644,7 @@ export default {
     },
     async handleAction(action) {
       if (action === '导出') return this.exportRows()
-      if (action === '添加' && this.pageTitle === '收款管理') return this.$router.push('/finance/item-1')
+      if (action === '前往新增收款' && this.config.key === 'receipts') return this.$router.push('/finance/item-1')
       if (action === '添加') return this.openDialog(`添加${this.pageTitle}`, this.config.formFields || [], null)
       if (action === '星支付' || action === '扫码支付') {
         const row = this.requireOne()
@@ -573,7 +653,7 @@ export default {
       }
       if (action === '编辑') {
         const row = this.requireOne()
-        const fields = this.config.formFields || (this.pageTitle === '收款管理' ? financePageConfigs['新增收款'].formFields : [])
+        const fields = this.config.formFields || (this.config.key === 'receipts' ? financePageConfigs['新增收款'].formFields : [])
         if (row) this.openDialog(action, fields, row)
         return
       }
@@ -596,7 +676,7 @@ export default {
         return
       }
       if (action === '提交') return this.executeDirectAction(action)
-      if (action === '打款') return this.openDialog(action, this.config.payoutFields || [], this.requireOne())
+      if (action === '打款' || action === '登记退款打款') return this.openDialog(action, this.config.payoutFields || [], this.requireOne())
       if (/发票|开票/.test(action)) return this.openDialog(action, invoiceFields, this.requireOne())
       if (action === '批量审核') {
         if (!this.selection.length) return this.$message.warning('请至少选择一条财务记录')
@@ -610,6 +690,13 @@ export default {
         return this.openDialog(action, this.config.auditFields, row)
       }
       if (action === '反审核' || action === '撤回') {
+        const row = this.requireOne()
+        if (!row) return
+        await performFinanceModuleAction(this.config.key, action, { id: row.id })
+        await this.loadData()
+        return this.$message.success(`${action}已完成并写入审计日志`)
+      }
+      if (action === '确认匹配' || action === '取消匹配') {
         const row = this.requireOne()
         if (!row) return
         await performFinanceModuleAction(this.config.key, action, { id: row.id })
@@ -653,6 +740,7 @@ export default {
       this.saveReceipt()
     },
     async openPicker(field) {
+      if (this.isAllStores) return this.$message.warning('请先在右上角选择具体门店，再选择客户、合同或收款人')
       this.pickerField = field
       this.pickerType = field.pickerType
       this.pickerTarget = 'receipt'
@@ -661,13 +749,14 @@ export default {
       this.pickerVisible = true
       this.pickerLoading = true
       try {
-        const response = await getFinancePickerData(field.pickerType)
+        const response = await getFinancePickerData(field.pickerType, { storeId: this.currentStoreId })
         this.pickerRows = response.data.list || []
       } finally {
         this.pickerLoading = false
       }
     },
     openDialogPicker(field) {
+      if (this.isAllStores) return this.$message.warning('请先在右上角选择具体门店，再选择下游业务数据')
       this.pickerTarget = 'dialog'
       this.pickerField = field
       this.pickerType = field.pickerType
@@ -675,7 +764,7 @@ export default {
       this.pickerRows = []
       this.pickerVisible = true
       this.pickerLoading = true
-      getFinancePickerData(field.pickerType)
+      getFinancePickerData(field.pickerType, { storeId: this.currentStoreId })
         .then(response => {
           this.pickerRows = response.data.list || []
         })
@@ -690,6 +779,14 @@ export default {
         this.$set(model, this.pickerField.key, row.username)
         this.$set(model, 'cashierId', row.id)
         this.$set(model, 'cashierName', row.name)
+      } else if (this.pickerType === 'contract') {
+        this.$set(model, this.pickerField.key, row.contractNo)
+        this.$set(model, 'contractId', row.id)
+        this.$set(model, 'customerId', row.customerId)
+        this.$set(model, 'customerName', row.customerName)
+        this.$set(model, 'customerMobile', row.mobile)
+        this.$set(model, 'store', row.store)
+        this.$set(model, 'amount', Number(row.balance || 0))
       } else {
         this.$set(model, this.pickerField.key, row.name)
         this.$set(model, 'customerId', row.id)
@@ -697,7 +794,8 @@ export default {
         this.$set(model, 'customerMobile', row.mobile)
       }
       this.pickerVisible = false
-      this.$message.success(`已选择${this.pickerType === 'employee' ? '业务员' : '客户'}：${model[this.pickerField.key]}`)
+      const typeLabel = { employee: '业务员', customer: '客户', contract: '合同' }[this.pickerType] || '记录'
+      this.$message.success(`已选择${typeLabel}：${model[this.pickerField.key]}`)
     },
     searchPicker() {
       if (!this.pickerKeyword) return this.$message.info(`当前共 ${this.pickerRows.length} 条可选记录`)
@@ -712,11 +810,12 @@ export default {
       this.$set(this.receiptForm, 'attachment', fileList.map(item => item.name).join('、'))
     },
     async saveReceipt() {
+      if (this.isAllStores) return this.$message.warning('全部门店仅支持汇总查询，请选择具体门店后保存收款单')
       const missing = this.config.formFields.filter(field => field.required && !this.receiptForm[field.key])
       if (missing.length) return this.$message.warning(`请填写：${missing.map(field => field.label).join('、')}`)
       this.saving = true
       try {
-        await saveFinanceModuleRecord(this.config.key, this.receiptForm)
+        await saveFinanceModuleRecord(this.config.key, { ...this.receiptForm, storeId: this.currentStoreId })
         this.$message.success('收款单已保存，并写入财务审计轨迹')
       } finally {
         this.saving = false
@@ -732,13 +831,16 @@ export default {
       if (!row && action !== `添加${this.pageTitle}` && action !== '添加') return
       this.dialogAction = action
       this.dialogTitle = action
-      this.dialogTip = `${action}将写入 MySQL 业务表和财务审计轨迹，请核对金额、门店和状态。`
+      this.dialogTip = /发票|开票/.test(action)
+        ? '请核对发票号码、开票金额、客户和关联业务单据。'
+        : `请核对${action}的金额、门店、经办人和当前状态。`
       this.dialogFields = fields
       this.dialogForm = { ...this.emptyForm(fields), ...(row || {}) }
       this.currentRow = row
       this.dialogVisible = true
     },
     async submitDialog() {
+      if (this.isAllStores) return this.$message.warning('全部门店仅支持汇总查询，请选择具体门店后操作业务单据')
       const missing = this.dialogFields.filter(field => field.required && !this.dialogForm[field.key])
       if (missing.length) return this.$message.warning(`请填写：${missing.map(field => field.label).join('、')}`)
       this.saving = true
@@ -746,12 +848,14 @@ export default {
         if (/^添加/.test(this.dialogAction) || this.dialogAction === '编辑') {
           await saveFinanceModuleRecord(this.config.key, {
             ...this.dialogForm,
+            storeId: this.currentStoreId,
             id: this.currentRow && this.currentRow.id
           })
         } else {
           const payload = {
             id: this.currentRow && this.currentRow.id,
-            ...this.dialogForm
+            ...this.dialogForm,
+            storeId: this.currentStoreId
           }
           if (this.dialogAction === '批量审核') payload.ids = this.selection.map(row => row.id)
           await performFinanceModuleAction(this.config.key, this.dialogAction, payload)
@@ -764,11 +868,46 @@ export default {
       }
     },
     async executeDirectAction(action) {
+      if (this.isAllStores) return this.$message.warning('全部门店仅支持汇总查询，请选择具体门店后提交单据')
       const row = this.requireOne()
       if (!row) return
       await performFinanceModuleAction(this.config.key, action, { id: row.id })
       await this.loadData()
       this.$message.success('已提交到下一审批节点')
+    },
+    workflowRowStatus(row) {
+      return String(row.status || row.auditStatus || row.paymentStatus || '')
+    },
+    workflowCount(status) {
+      return this.rows.filter(row => this.workflowRowStatus(row) === status).length
+    },
+    setWorkflowStatus(status) {
+      this.workflowStatus = this.workflowStatus === status ? '' : status
+      this.pagination.page = 1
+      this.selection = []
+    },
+    rowWorkflowAction(row) {
+      if (!this.config.workflow || this.isAllStores) return ''
+      const stage = this.config.workflow.stages.find(item => item.status === this.workflowRowStatus(row))
+      const action = stage && stage.action
+      return action && this.visibleActions.includes(action) ? action : ''
+    },
+    runRowWorkflow(row, action) {
+      this.selection = [row]
+      if (action === '编辑') return this.handleAction(action)
+      if (action === '提交') return this.executeDirectAction(action)
+      if (action === '流程审批') return this.openDialog(action, this.config.auditFields || [], row)
+      if (action === '打款' || action === '登记退款打款') return this.openDialog(action, this.config.payoutFields || [], row)
+      if (action === '确认匹配' || action === '取消匹配') return this.handleAction(action)
+    },
+    applyCurrentStoreToReceipt() {
+      if (!this.currentStore) {
+        this.$set(this.receiptForm, 'store', '')
+        this.$set(this.receiptForm, 'storeId', '')
+        return
+      }
+      this.$set(this.receiptForm, 'store', this.currentStore.name)
+      this.$set(this.receiptForm, 'storeId', this.currentStore.id)
     },
     applyLocalStatus() {
       if (!this.currentRow) return
@@ -797,16 +936,29 @@ export default {
       this.$message.success(`已导出 ${this.filteredRows.length} 条当前查询记录`)
     },
     recordName(row) {
-      return row.receiptNo || row.refundNo || row.exchangeNo || row.budgetNo || row.expenseNo || row.paymentNo || row.documentNo || row.customerName || row.id
+      return row.receiptNo || row.externalReference || row.refundNo || row.exchangeNo || row.budgetNo || row.expenseNo || row.paymentNo || row.documentNo || row.customerName || row.id
+    },
+    rowDateForRange(key, row) {
+      const keys = {
+        documentRange: ['documentDate', 'createdAt'],
+        financeRange: ['documentDate', 'createdAt'],
+        stayRange: ['checkInAt'],
+        applyRange: ['appliedAt', 'createdAt'],
+        budgetRange: ['budgetDate'],
+        publishedRange: ['createdAt'],
+        transactionRange: ['transactionDate']
+      }[key] || []
+      const value = keys.map(item => row[item]).find(Boolean)
+      return value ? String(value).slice(0, 10) : ''
     },
     actionIcon(action) {
       if (/添加|保存/.test(action)) return 'el-icon-plus'
-      if (/流程审批|审核|提交/.test(action)) return 'el-icon-s-check'
+      if (/流程审批|审核|提交|确认匹配/.test(action)) return 'el-icon-s-check'
       if (/导出/.test(action)) return 'el-icon-download'
       if (/编辑/.test(action)) return 'el-icon-edit'
       if (/删除/.test(action)) return 'el-icon-delete'
       if (/打印/.test(action)) return 'el-icon-printer'
-      if (/撤回|反审核/.test(action)) return 'el-icon-refresh-left'
+      if (/撤回|反审核|取消匹配/.test(action)) return 'el-icon-refresh-left'
       if (/采购计划/.test(action)) return 'el-icon-shopping-cart-full'
       if (/星支付|扫码支付/.test(action)) return 'el-icon-full-screen'
       if (/手续费/.test(action)) return 'el-icon-coin'
@@ -832,18 +984,28 @@ export default {
 
 <style lang="scss" scoped>
 .finance-workbench { min-height: calc(100vh - 84px); padding: 22px; color: #26354c; background: #f3f6fa; }
-.hero-panel { display: flex; justify-content: space-between; align-items: center; gap: 28px; padding: 26px 30px; border-radius: 16px; color: white; background: linear-gradient(125deg, #55410d 0%, #9d7316 54%, #dda934 100%); box-shadow: 0 14px 34px rgba(116, 84, 20, .22); }
-.eyebrow { margin-bottom: 9px; color: #fff0bd; font-size: 13px; font-weight: 700; letter-spacing: .7px; }
+.hero-panel { display: flex; justify-content: space-between; align-items: center; gap: 28px; padding: 26px 30px; border-radius: 16px; color: white; background: linear-gradient(125deg, #28241e 0%, #5f4b2d 56%, #a68045 100%); box-shadow: 0 14px 34px rgba(74, 55, 26, .2); }
+.eyebrow { margin-bottom: 9px; color: #f3dfb7; font-size: 13px; font-weight: 700; letter-spacing: .7px; }
 .hero-panel h1 { margin: 0 0 9px; font-size: 27px; }
-.hero-panel p { max-width: 800px; margin: 0; color: #fff2c8; font-size: 14px; line-height: 1.7; }
+.hero-panel p { max-width: 800px; margin: 0; color: #f7efe0; font-size: 14px; line-height: 1.7; }
 .hero-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; }
 .metric-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 16px; overflow: hidden; border: 1px solid #e4e8ef; border-radius: 12px; background: #e4e8ef; }
 .metric-item { padding: 18px 22px; background: white; }
 .metric-item span { display: block; color: #718096; font-size: 12px; }
-.metric-item strong { display: block; margin: 7px 0 4px; color: #a16d0b; font-size: 24px; }
+.metric-item strong { display: block; margin: 7px 0 4px; color: #8c6a36; font-size: 24px; }
 .metric-item small { color: #9aa6b4; }
+.finance-view-panel { margin-top: 16px; padding: 17px 20px; border: 1px solid #e9e0cf; border-radius: 12px; background: #fff; }
+.view-title { display: flex; align-items: flex-start; gap: 11px; color: #6b4b1d; }.view-title > i { margin-top: 2px; font-size: 21px; }.view-title b, .view-title span { display: block; }.view-title b { margin-bottom: 4px; font-size: 15px; }.view-title span { color: #788397; font-size: 12px; line-height: 1.55; }
+.ledger-view { display: grid; grid-template-columns: minmax(280px, 1.5fr) minmax(260px, 1.2fr) minmax(260px, 1fr); gap: 18px; align-items: center; border-left: 4px solid #a87b35; }.view-rule { padding: 10px 12px; border-radius: 8px; color: #6d5c3d; background: #fff8e9; font-size: 12px; line-height: 1.5; }.view-rule i { margin-right: 5px; color: #b78026; }.view-stats { display: flex; justify-content: space-between; gap: 10px; color: #7c8796; font-size: 12px; }.view-stats span { min-width: 76px; text-align: center; }.view-stats b { display: block; margin-top: 4px; color: #8d682d; font-size: 18px; }
+.approval-view { border-left: 4px solid #d89548; background: linear-gradient(90deg, #fffaf3, #fff); }.approval-path { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-top: 16px; color: #795c2e; font-size: 13px; }.approval-path span { padding: 8px 12px; border: 1px solid #ebd8b8; border-radius: 20px; background: #fff; }.approval-path i { color: #bf913f; }
+.analysis-view { border-left: 4px solid #4f8d8a; background: linear-gradient(90deg, #f5fbfa, #fff); }.analysis-chips { display: grid; grid-template-columns: repeat(4, minmax(100px, 1fr)); gap: 10px; margin-top: 14px; }.analysis-chips span { padding: 10px 12px; border: 1px solid #dbece9; border-radius: 8px; color: #28716c; background: #fff; font-size: 18px; font-weight: 700; }.analysis-chips b { display: block; margin-bottom: 4px; color: #70818c; font-size: 11px; font-weight: 500; }
 .content-card { margin-top: 16px; border: 0; border-radius: 12px; }
 .action-card ::v-deep .el-card__body { padding: 14px 18px; }
+.workflow-card { border: 1px solid #ede4d2; background: #fffdfa; }
+.workflow-heading { display: flex; justify-content: space-between; gap: 20px; align-items: center; margin-bottom: 16px; }
+.workflow-heading h2 { margin: 0 0 5px; color: #513c1d; font-size: 17px; }.workflow-heading p { margin: 0; color: #788397; font-size: 12px; line-height: 1.6; }
+.workflow-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.workflow-steps button { display: flex; align-items: center; gap: 10px; min-height: 62px; padding: 12px; border: 1px solid #e7dcc5; border-radius: 9px; color: #536176; background: #fff; cursor: pointer; text-align: left; }.workflow-steps button:hover, .workflow-steps button.active { border-color: #b6802d; color: #74501a; background: #fff8ea; }.workflow-steps b { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 50%; color: white; background: #a97b31; font-size: 12px; }.workflow-steps span { flex: 1; font-weight: 700; }.workflow-steps em { color: #9a6a1f; font-size: 18px; font-style: normal; font-weight: 700; }
 .card-heading, .table-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
 .card-heading h2 { margin: 0 0 4px; font-size: 16px; }
 .card-heading p { margin: 0; color: #8a97a8; font-size: 12px; }
@@ -884,7 +1046,8 @@ export default {
 .detail-drawer h3 { margin: 26px 0 14px; font-size: 15px; }
 @media (max-width: 900px) {
   .finance-workbench { padding: 12px; }
-  .hero-panel, .hero-actions, .table-toolbar, .pagination-row { align-items: flex-start; flex-direction: column; }
+  .hero-panel, .hero-actions, .table-toolbar, .pagination-row, .workflow-heading { align-items: flex-start; flex-direction: column; }
   .metric-strip { grid-template-columns: repeat(2, 1fr); }
+  .ledger-view { grid-template-columns: 1fr; }.analysis-chips { grid-template-columns: repeat(2, 1fr); }
 }
 </style>

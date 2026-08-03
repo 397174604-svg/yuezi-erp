@@ -8,9 +8,17 @@ const resourcePermissions = {
     actions: {
       打印: 48,
       服务预约: 86,
+      新建预约: 86,
       确认完成: 37,
+      完成服务: 37,
       取消: 65,
+      取消预约: 65,
       预约确认: 91,
+      确认预约: 91,
+      客户到店: 91,
+      开始服务: 91,
+      改期: 86,
+      标记爽约: 65,
       读卡: 18
     }
   },
@@ -63,9 +71,10 @@ export function recoveryActionPermission(resource, action) {
 }
 
 export function canUseRecoveryAction(resource, action, permissions, roles) {
-  if ((roles || []).includes('SYS_ADMIN')) return true
   const permission = recoveryActionPermission(resource, action)
-  return Boolean(permission && (permissions || []).includes(permission))
+  if (!permission) return false
+  if ((roles || []).includes('SYS_ADMIN')) return true
+  return (permissions || []).includes(permission)
 }
 
 export function visibleRecoveryActions(resource, actions, permissions, roles) {

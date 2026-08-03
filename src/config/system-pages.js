@@ -310,8 +310,42 @@ export const systemPageConfigs = systemDefinitions.reduce((result, page) => {
   return result
 }, {})
 
+const systemFeatureConfigs = {
+  系统设置: {
+    ...systemPageConfigs['系统参数设置'],
+    featureId: 'F061',
+    title: '系统设置'
+  },
+  历史数据迁移工具: defineSystemPage({
+    featureId: 'F079',
+    title: '历史数据迁移工具',
+    key: 'history-data-migration',
+    mode: 'migration',
+    description: '管理历史数据导入批次、字段映射、校验结果和回滚记录；未校验批次不得写入正式业务表。',
+    filters: [input('batchNo', '迁移批次号'), select('migrationStatus', '迁移状态'), dateRange('createdRange', '创建时间')],
+    columns: [text('batchNo', '迁移批次号', 150), text('dataDomain', '数据范围'), text('sourceSystem', '来源系统'), numberColumn('totalRows', '总行数'), numberColumn('failedRows', '失败行数'), status('migrationStatus', '迁移状态'), dateColumn('createdAt', '创建时间')],
+    formFields: [input('batchName', '批次名称'), select('dataDomain', '数据范围'), input('sourceFile', '来源文件'), textarea('mappingNote', '字段映射说明')],
+    structure: ['迁移批次', '字段映射', '预校验结果', '执行与回滚审计'],
+    dependencies: ['历史数据模板与唯一键需确认', '正式执行前必须完成备份和预校验']
+  }),
+  品牌定制: defineSystemPage({
+    featureId: 'F098',
+    title: '品牌定制',
+    key: 'brand-customization',
+    mode: 'branding',
+    description: '维护品牌 Logo、主题色、登录页和专属域名配置；发布前提供预览并保留版本记录。',
+    filters: [input('brandName', '品牌名称'), select('publishStatus', '发布状态')],
+    columns: [text('brandName', '品牌名称', 180), text('themeColor', '主题色'), text('domain', '专属域名', 190), text('version', '版本'), status('publishStatus', '发布状态'), dateColumn('updatedAt', '更新时间')],
+    formFields: [input('brandName', '品牌名称'), input('logoFile', '品牌 Logo'), input('themeColor', '主题色'), input('domain', '专属域名'), textarea('loginPageNote', '登录页说明')],
+    structure: ['品牌基础信息', '主题与登录页预览', '域名配置', '发布版本记录'],
+    dependencies: ['专属域名需完成 DNS 与 HTTPS 配置', '发布操作需保留版本和审计记录']
+  })
+}
+
+systemFeatureConfigs['品牌定制（Logo/主题色/专属域名）'] = systemFeatureConfigs.品牌定制
+
 export function getSystemPageConfig(title) {
-  return systemPageConfigs[title] || {
+  return systemFeatureConfigs[title] || systemPageConfigs[title] || {
     ...systemDefinitions[0],
     title,
     key: 'unverified-system-page',

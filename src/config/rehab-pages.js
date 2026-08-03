@@ -1,9 +1,10 @@
 import { applyOriginalEvidence } from './original-page-evidence'
 import { applyAuditedSurfaceEvidence } from './audited-surface-adapter'
 import { serviceListColumns, serviceOverviewEvidence } from './rehab-service-overview'
+import { getRecoveryFeaturePageConfig } from './recovery-feature-pages'
 
 const stores = ['中心广场旗舰店', '黄河路轻奢店']
-const serviceStatuses = ['待预约', '已预约', '待服务', '服务中', '已完成', '已取消']
+const serviceStatuses = ['待预约', '待确认', '已确认', '已到店', '服务中', '已完成', '已取消', '已爽约']
 const customerStatuses = ['未入住', '已订房', '正入住', '已退房']
 
 const input = (key, label, required = false) => ({ key, label, type: 'input', required })
@@ -20,7 +21,7 @@ const bookingFields = [
   select('store', '服务门店', stores, true),
   select('serviceCategory', '服务类别', ['产后修复', '身体护理', '仪器项目', '健康评估'], true),
   input('serviceItem', '服务项目', true),
-  input('technician', '服务人员'),
+  input('technician', '服务人员', true),
   date('appointmentDate', '预约日期', true),
   input('appointmentPeriod', '预约时段', true),
   number('serviceCount', '服务次数'),
@@ -72,8 +73,8 @@ export const rehabPageConfigs = {
   服务预约列表: {
     key: 'service-appointments',
     mode: 'list',
-    description: '管理产康服务预约、预约确认、执行和取消状态。',
-    actions: ['添加', '编辑', '删除', '预约确认', '开始服务', '完成服务', '取消'],
+    description: '统一管理到店参观、产康与客房服务预约，并检查门店、人员、时段和资源冲突。',
+    actions: ['新建预约', '确认预约', '客户到店', '开始服务', '完成服务', '改期', '取消预约', '标记爽约'],
     filters: [
       input('customerName', '客户姓名'), input('mobile', '联系电话'),
       select('store', '门店', stores), input('serviceItem', '服务项目'),
@@ -255,5 +256,5 @@ Object.assign(rehabPageConfigs.服务综合查询, {
 })
 
 export function getRehabPageConfig(title) {
-  return rehabPageConfigs[title] || rehabPageConfigs.未预约客户服务
+  return getRecoveryFeaturePageConfig(title) || rehabPageConfigs[title] || rehabPageConfigs.未预约客户服务
 }

@@ -8,7 +8,11 @@ never fall back to JSON files.
 from __future__ import annotations
 
 from collections import defaultdict
+from decimal import Decimal
+import json
 from typing import Any
+
+from runtime_security import store_scope_clause
 
 
 SYSTEM_RESOURCES = {
@@ -60,6 +64,7 @@ NURSING_RESOURCES = {
     "nursing-center",
     "nursing-plan",
     "nursing-roster-v2",
+    "nursing-dashboard",
     "baby-files",
     "health-assessments",
     "diet-assessments",
@@ -74,6 +79,12 @@ NURSING_RESOURCES = {
     "baby-nursing-summary",
     "nursing-roster",
     "check-in-handover",
+    "nursing-sales-performance",
+    "record-visibility-scope",
+    "missed-record-reminders",
+    "shift-handover",
+    "infection-management",
+    "nursing-task-orders",
 }
 
 MATERNITY_NURSE_RESOURCES = {
@@ -108,6 +119,7 @@ REPORT_RESOURCES = {
     "f5-prestay-customer-purchase",
     "f6-occupancy-rate",
     "c0-daily-operation",
+    "c0-monthly-operation",
     "c1-member-recharge-summary",
     "c2-receipt-settlement-type-summary",
     "c3-payment-summary-analysis",
@@ -139,17 +151,14 @@ def _rows(connection, sql: str, params: Any = ()) -> list[dict]:
         return list(cursor.fetchall())
 
 
-def _store_scope(user: dict, alias: str = "") -> tuple[str, list]:
-    if "SYS_ADMIN" in user.get("roles", []):
-        return "1=1", []
-    store_ids = list(user.get("store_ids") or [])
-    if not store_ids:
-        return "1=0", []
+def _store_scope(
+    user: dict, alias: str = "", store_id: int | None = None
+) -> tuple[str, list]:
+    clause, params = store_scope_clause(user, alias)
+    if store_id is None:
+        return clause, params
     column = f"{alias}.store_id" if alias else "store_id"
-    return (
-        f"{column} IN ({','.join(['%s'] * len(store_ids))})",
-        store_ids,
-    )
+    return f"{clause} AND {column}=%s", [*params, store_id]
 
 
 def _status(value: Any) -> str:
@@ -160,6 +169,15 @@ def _status(value: Any) -> str:
         "正常",
         "在职",
     } else "停用"
+
+
+def _masked_phone(value: Any) -> str:
+    text = str(value or "")
+    if not text:
+        return text
+    if len(text) < 7:
+        return "****"
+    return f"{text[:3]}****{text[-4:]}"
 
 
 def foundation_overview(connection, user: dict) -> dict:
@@ -249,24 +267,30 @@ def foundation_overview(connection, user: dict) -> dict:
     for row in roles:
         row["status"] = _status(row.get("status"))
 
-    if "SYS_ADMIN" in user.get("roles", []):
-        user_clause, user_params = "1=1", []
-    else:
-        user_store_ids = list(user.get("store_ids") or [])
-        user_clause = (
-            f"ua.default_store_id IN ({','.join(['%s'] * len(user_store_ids))})"
-            if user_store_ids
-            else "1=0"
-        )
-        user_params = user_store_ids
+    user_store_ids = list(user.get("store_ids") or [])
+    user_clause = (
+        f"ua.default_store_id IN ({','.join(['%s'] * len(user_store_ids))})"
+        if user_store_ids
+        else "1=0"
+    )
+    user_params = user_store_ids
     users = _rows(
         connection,
         f"""
         SELECT ua.user_id AS id, ua.username,
+               ua.staff_id AS staffId,
+               ua.default_store_id AS storeId,
                COALESCE(st.name, ua.username) AS name,
-               st.phone AS mobile, s.name AS store,
+               CASE
+                 WHEN st.phone IS NULL OR st.phone='' THEN st.phone
+                 WHEN CHAR_LENGTH(st.phone)>=7
+                   THEN CONCAT(LEFT(st.phone,3),'****',RIGHT(st.phone,4))
+                 ELSE '****'
+               END AS mobile,
+               s.name AS store,
                COALESCE(d.name, st.department) AS department,
                GROUP_CONCAT(DISTINCT r.name ORDER BY r.name SEPARATOR '、') AS role,
+               MIN(r.role_id) AS roleId,
                ua.last_login_at AS lastLogin,
                ua.status
         FROM user_accounts ua
@@ -340,6 +364,30 @@ def foundation_overview(connection, user: dict) -> dict:
         ORDER BY module_code
         """,
     )
+    role_permission_rows = _rows(
+        connection,
+        """
+        SELECT rp.role_id AS roleId, p.module_code AS module,
+               CASE
+                 WHEN p.action_code IN ('VIEW','QUERY') THEN 'view'
+                 WHEN p.action_code IN ('CREATE','ADD') THEN 'create'
+                 WHEN p.action_code IN ('EDIT','UPDATE') THEN 'edit'
+                 WHEN p.action_code IN ('APPROVE','AUDIT') THEN 'approve'
+                 WHEN p.action_code='EXPORT' THEN 'export'
+               END AS action
+        FROM role_permissions rp
+        JOIN permissions p ON p.permission_id=rp.permission_id
+        JOIN roles r ON r.role_id=rp.role_id
+        WHERE r.tenant_id=%s AND rp.effect='ALLOW' AND p.status='ACTIVE'
+        """,
+        (tenant_id,),
+    )
+    role_permissions: dict[int, list] = defaultdict(list)
+    for row in role_permission_rows:
+        if row.get("action"):
+            role_permissions[int(row["roleId"])].append(
+                {"module": row["module"], "action": row["action"]}
+            )
     return {
         "stores": stores,
         "departments": departments,
@@ -348,6 +396,7 @@ def foundation_overview(connection, user: dict) -> dict:
         "dictionaryTypes": dictionary_types,
         "dictionaryItems": dict(dictionary_items),
         "permissions": permission_rows,
+        "rolePermissions": dict(role_permissions),
         "source": "mysql",
     }
 
@@ -401,17 +450,14 @@ def system_module(connection, user: dict, resource: str) -> dict:
             (tenant_id,),
         )
     elif resource == "user-management":
-        if "SYS_ADMIN" in user.get("roles", []):
-            clause, params = "1=1", []
-        else:
-            user_store_ids = list(user.get("store_ids") or [])
-            clause = (
-                "ua.default_store_id IN "
-                f"({','.join(['%s'] * len(user_store_ids))})"
-                if user_store_ids
-                else "1=0"
-            )
-            params = user_store_ids
+        user_store_ids = list(user.get("store_ids") or [])
+        clause = (
+            "ua.default_store_id IN "
+            f"({','.join(['%s'] * len(user_store_ids))})"
+            if user_store_ids
+            else "1=0"
+        )
+        params = user_store_ids
         rows = _rows(
             connection,
             f"""
@@ -440,6 +486,7 @@ def system_module(connection, user: dict, resource: str) -> dict:
         )
         for row in rows:
             row["accountStatus"] = _status(row.get("accountStatus"))
+            row["mobile"] = _masked_phone(row.get("mobile"))
         return {"list": rows, "total": len(rows), "source": "mysql"}
     elif resource == "data-dictionary":
         rows = _rows(
@@ -705,7 +752,54 @@ def system_module(connection, user: dict, resource: str) -> dict:
     for row in rows:
         if "status" in row:
             row["status"] = _status(row.get("status"))
+        if resource == "employee-records":
+            row["mobile"] = _masked_phone(row.get("mobile"))
     return {"list": rows, "total": len(rows), "source": "mysql"}
+
+
+def operational_acceptance_rows(
+    connection,
+    user: dict,
+    module_code: str,
+    resource: str,
+    store_id: int | None = None,
+) -> list[dict]:
+    """Return durable local acceptance rows without inventing runtime data."""
+    clause, params = _store_scope(user, "record", store_id)
+    stored = _rows(
+        connection,
+        f"""
+        SELECT record.record_id, record.store_id, record.business_no,
+               record.status, record.payload_json, record.created_at,
+               record.updated_at
+        FROM erp_operational_records record
+        WHERE record.tenant_id=%s AND record.module_code=%s
+          AND record.resource_code=%s AND record.deleted_at IS NULL
+          AND {clause}
+        ORDER BY record.record_id DESC
+        LIMIT 1000
+        """,
+        [user["tenant_id"], module_code, resource, *params],
+    )
+    rows = []
+    for record in stored:
+        try:
+            payload = json.loads(record.get("payload_json") or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        rows.append({
+            **payload,
+            "id": f"OP-{record['record_id']}",
+            "recordId": f"OP-{record['record_id']}",
+            "businessNo": record.get("business_no"),
+            "storeId": record.get("store_id"),
+            "status": record.get("status") or payload.get("status"),
+            "createdAt": record.get("created_at") or payload.get("createdAt"),
+            "updatedAt": record.get("updated_at") or payload.get("updatedAt"),
+        })
+    return rows
 
 
 def basic_module(connection, user: dict, resource: str) -> dict:
@@ -790,7 +884,6 @@ def basic_module(connection, user: dict, resource: str) -> dict:
             """,
             (tenant_id,),
         )
-        return {"list": rows, "total": len(rows), "source": "mysql"}
     elif resource == "report-templates":
         rows = _rows(
             connection,
@@ -809,24 +902,40 @@ def basic_module(connection, user: dict, resource: str) -> dict:
         )
     else:
         rows = []
+    durable_fallback = False
+    if not rows:
+        rows = operational_acceptance_rows(connection, user, "BASIC", resource)
+        durable_fallback = bool(rows)
     for row in rows:
         if "status" in row:
-            row["status"] = _status(row.get("status"))
-    return {"list": rows, "total": len(rows), "source": "mysql"}
+            if not durable_fallback:
+                row["status"] = _status(row.get("status"))
+    return {
+        "list": rows,
+        "total": len(rows),
+        "source": "mysql",
+        "acceptanceSeed": durable_fallback,
+    }
 
 
-def nursing_module(connection, user: dict, resource: str) -> dict:
+def nursing_module(
+    connection,
+    user: dict,
+    resource: str,
+    store_id: int | None = None,
+) -> dict:
     if resource not in NURSING_RESOURCES:
         raise KeyError(resource)
     tenant_id = user["tenant_id"]
-    clause, params = _store_scope(user, "c")
+    clause, params = _store_scope(user, "c", store_id)
     rows: list[dict] = []
     if resource == "nursing-center":
         rows = _rows(
             connection,
             f"""
             SELECT c.customer_id AS id, c.name AS customerName,
-                   room.room_no AS room, s.name AS store,
+                   c.store_id AS storeId, MAX(room.room_no) AS room,
+                   MAX(room.floor) AS floor, MAX(s.name) AS store,
                    c.status AS customerStatus,
                    COUNT(DISTINCT baby.baby_id) AS babyCount,
                    0 AS pendingServices, 0 AS completedServices
@@ -842,14 +951,77 @@ def nursing_module(connection, user: dict, resource: str) -> dict:
               ON baby.customer_id=c.customer_id
              AND baby.tenant_id=c.tenant_id
              AND baby.deleted_at IS NULL
-            WHERE c.tenant_id=%s AND c.deleted_at IS NULL AND {clause}
-            GROUP BY c.customer_id
-            ORDER BY room.floor, room.room_no, c.customer_id
+            WHERE c.tenant_id=%s AND c.deleted_at IS NULL
+              AND booking.booking_id IS NOT NULL
+              AND {clause}
+            GROUP BY c.customer_id,c.name,c.store_id,c.status
+            ORDER BY floor, room, c.customer_id
             """,
             [tenant_id, *params],
         )
+        baby_clause, baby_params = _store_scope(
+            user, "baby", store_id
+        )
+        baby_rows = _rows(
+            connection,
+            f"""
+            SELECT baby.baby_id AS id, baby.customer_id AS customerId,
+                   baby.name, baby.gender, baby.birth_date AS birthDate,
+                   baby.note AS remark
+            FROM babies baby
+            WHERE baby.tenant_id=%s AND baby.deleted_at IS NULL
+              AND {baby_clause}
+            ORDER BY baby.baby_id
+            """,
+            [tenant_id, *baby_params],
+        )
+        babies_by_customer: dict[int, list[dict]] = defaultdict(list)
+        for baby in baby_rows:
+            babies_by_customer[baby["customerId"]].append(baby)
+        for row in rows:
+            row["babies"] = babies_by_customer.get(row["id"], [])
+            row["careStatus"] = "未评估"
+            row["careLevel"] = "未设置"
+    elif resource in {
+        "nursing-roster-v2",
+        "nursing-roster",
+        "nursing-dashboard",
+    }:
+        schedule_clause, schedule_params = _store_scope(
+            user, "schedule", store_id
+        )
+        rows = _rows(
+            connection,
+            f"""
+            SELECT schedule.schedule_id AS id,
+                   staff.name AS employeeName,
+                   COALESCE(position.name, staff.position) AS department,
+                   schedule.work_date AS shiftDate,
+                   schedule.shift AS shiftName,
+                   schedule.status,
+                   schedule.note AS remark,
+                   schedule.store_id AS storeId,
+                   store.name AS store
+            FROM schedules schedule
+            LEFT JOIN staff ON staff.staff_id=schedule.staff_id
+            LEFT JOIN positions position
+              ON position.position_id=staff.position_id
+            LEFT JOIN stores store ON store.store_id=schedule.store_id
+            WHERE schedule.tenant_id=%s
+              AND schedule.deleted_at IS NULL
+              AND {schedule_clause}
+              AND (
+                position.name LIKE '%%护理%%'
+                OR staff.position LIKE '%%护理%%'
+                OR staff.role LIKE '%%护理%%'
+              )
+            ORDER BY schedule.work_date DESC, schedule.schedule_id DESC
+            LIMIT 1000
+            """,
+            [tenant_id, *schedule_params],
+        )
     elif resource == "baby-files":
-        baby_clause, baby_params = _store_scope(user, "baby")
+        baby_clause, baby_params = _store_scope(user, "baby", store_id)
         rows = _rows(
             connection,
             f"""
@@ -874,7 +1046,7 @@ def nursing_module(connection, user: dict, resource: str) -> dict:
             [tenant_id, *baby_params],
         )
     elif resource in {"baby-nursing-records", "baby-nursing-summary"}:
-        baby_clause, baby_params = _store_scope(user, "baby")
+        baby_clause, baby_params = _store_scope(user, "baby", store_id)
         if resource == "baby-nursing-records":
             rows = _rows(
                 connection,
@@ -915,7 +1087,9 @@ def nursing_module(connection, user: dict, resource: str) -> dict:
                 [tenant_id, *baby_params],
             )
     elif resource in {"health-assessments", "diet-assessments"}:
-        profile_clause, profile_params = _store_scope(user, "profile")
+        profile_clause, profile_params = _store_scope(
+            user, "profile", store_id
+        )
         domain = "膳食" if resource == "diet-assessments" else "月子"
         rows = _rows(
             connection,
@@ -944,7 +1118,9 @@ def nursing_module(connection, user: dict, resource: str) -> dict:
             [tenant_id, domain, *profile_params],
         )
     elif resource == "check-in-handover":
-        handover_clause, handover_params = _store_scope(user, "handover")
+        handover_clause, handover_params = _store_scope(
+            user, "handover", store_id
+        )
         rows = _rows(
             connection,
             f"""
@@ -966,6 +1142,43 @@ def nursing_module(connection, user: dict, resource: str) -> dict:
             ORDER BY handover.handover_id DESC
             """,
             [tenant_id, *handover_params],
+        )
+    elif resource == "nursing-sales-performance":
+        order_clause, order_params = _store_scope(
+            user, "order_row", store_id
+        )
+        rows = _rows(
+            connection,
+            f"""
+            SELECT MIN(item.id) AS id,
+                   order_row.order_no AS performanceNo,
+                   LEFT(order_row.created_at,10) AS performanceDate,
+                   store.name AS store,
+                   item.executor AS nurseName,
+                   item.name AS itemName,
+                   SUM(COALESCE(item.qty,0)) AS quantity,
+                   SUM(COALESCE(item.performance,0))
+                     AS performanceAmount,
+                   SUM(
+                     COALESCE(item.qty,0) * COALESCE(item.unit_price,0)
+                   ) AS saleAmount,
+                   order_row.order_status AS status
+            FROM orders order_row
+            JOIN order_items item
+              ON item.order_no=order_row.order_no
+             AND item.tenant_id=order_row.tenant_id
+            LEFT JOIN stores store
+              ON store.store_id=order_row.store_id
+            WHERE order_row.tenant_id=%s
+              AND order_row.deleted_at IS NULL
+              AND order_row.domain IN ('护理','护理服务','月子护理')
+              AND {order_clause}
+            GROUP BY order_row.order_no, store.name, item.executor,
+                     item.name, order_row.order_status
+            ORDER BY performanceDate DESC, performanceNo DESC
+            LIMIT 1000
+            """,
+            [tenant_id, *order_params],
         )
     return {"list": rows, "total": len(rows), "source": "mysql"}
 
@@ -998,6 +1211,8 @@ def maternity_nurse_module(connection, user: dict, resource: str) -> dict:
             """,
             [user["tenant_id"], *params],
         )
+        for row in rows:
+            row["phone"] = _masked_phone(row.get("phone"))
     return {"list": rows, "total": len(rows), "source": "mysql"}
 
 
@@ -1117,6 +1332,9 @@ def mama_box_overview(connection, user: dict) -> dict:
         """,
         [tenant_id, *order_params],
     )
+    if not user.get("unmasked_customer_phone"):
+        for row in orders:
+            row["mobile"] = _masked_phone(row.get("mobile"))
 
     staff_clause, staff_params = _store_scope(user, "staff")
     matrons = _rows(
@@ -1151,6 +1369,8 @@ def mama_box_overview(connection, user: dict) -> dict:
         """,
         [tenant_id, *staff_params],
     )
+    for row in matrons:
+        row["mobile"] = _masked_phone(row.get("mobile"))
 
     categories = _rows(
         connection,
@@ -1176,7 +1396,7 @@ def mama_box_overview(connection, user: dict) -> dict:
         """,
         (tenant_id,),
     )
-    return {
+    overview = {
         "products": products,
         "orders": orders,
         "projects": projects,
@@ -1192,6 +1412,20 @@ def mama_box_overview(connection, user: dict) -> dict:
         "schedule": {"start": "", "end": "", "days": [], "rows": []},
         "source": "mysql",
     }
+    for resource in (
+        "products", "orders", "projects", "matrons", "categories",
+        "parenting", "questions", "reviews", "community", "content",
+        "comments", "classes",
+    ):
+        if not overview[resource]:
+            overview[resource] = operational_acceptance_rows(
+                connection, user, "MALL", resource
+            )
+    if not overview["schedule"]["rows"]:
+        overview["schedule"]["rows"] = operational_acceptance_rows(
+            connection, user, "MALL", "class-schedule"
+        )
+    return overview
 
 
 def report_module(connection, user: dict, resource: str) -> dict:
@@ -1348,6 +1582,27 @@ def report_module(connection, user: dict, resource: str) -> dict:
             """,
             [tenant_id, *params],
         )
+    elif resource == "c0-monthly-operation":
+        clause, params = _store_scope(user, "receipt")
+        rows = _rows(
+            connection,
+            f"""
+            SELECT MIN(receipt.receipt_id) AS id,
+                   DATE_FORMAT(receipt.received_at, '%%Y-%%m') AS statMonth,
+                   s.name AS store,
+                   COUNT(receipt.receipt_id) AS documentCount,
+                   COALESCE(SUM(receipt.amount),0) AS receivedAmount,
+                   COALESCE(SUM(receipt.amount),0) AS incomeAmount,
+                   0 AS refundAmount, 0 AS paymentAmount, 0 AS costAmount,
+                   COALESCE(SUM(receipt.amount),0) AS netAmount
+            FROM finance_receipts receipt
+            JOIN stores s ON s.store_id=receipt.store_id
+            WHERE receipt.tenant_id=%s AND {clause}
+            GROUP BY DATE_FORMAT(receipt.received_at, '%%Y-%%m'), receipt.store_id
+            ORDER BY statMonth DESC, receipt.store_id
+            """,
+            [tenant_id, *params],
+        )
     elif resource in {
         "c0-daily-operation",
         "c2-receipt-settlement-type-summary",
@@ -1377,6 +1632,332 @@ def report_module(connection, user: dict, resource: str) -> dict:
             ORDER BY statDate DESC, receipt.store_id
             """,
             [tenant_id, *params],
+        )
+    elif resource == "c1-member-recharge-summary":
+        receipt_clause, receipt_params = _store_scope(user, "receipt")
+        ledger_clause, ledger_params = _store_scope(user, "ledger")
+        rows = _rows(
+            connection,
+            f"""
+            SELECT recharge.*
+            FROM (
+              SELECT CONCAT('R-',receipt.receipt_id) AS id,
+                     DATE(receipt.received_at) AS rechargeDate,
+                     customer.name AS customerName,
+                     (
+                       SELECT MAX(ent.card_no)
+                       FROM recovery_service_entitlements ent
+                       WHERE ent.tenant_id=receipt.tenant_id
+                         AND ent.customer_id=receipt.customer_id
+                         AND ent.deleted_at IS NULL
+                     ) AS cardNo,
+                     s.name AS store, receipt.amount AS rechargeAmount,
+                     COALESCE(ext.gift_amount,0) AS giftAmount,
+                     receipt.payment_method AS paymentMethod,
+                     COALESCE(operator_user.username,'未记录') AS operator
+              FROM finance_receipts receipt
+              JOIN customers customer
+                ON customer.customer_id=receipt.customer_id
+              JOIN stores s ON s.store_id=receipt.store_id
+              LEFT JOIN finance_receipt_extensions ext
+                ON ext.receipt_id=receipt.receipt_id
+              LEFT JOIN user_accounts operator_user
+                ON operator_user.user_id=receipt.receiver_user_id
+              WHERE receipt.tenant_id=%s
+                AND receipt.status IN ('审核通过','已审核')
+                AND (
+                  receipt.receipt_type='会员充值'
+                  OR COALESCE(ext.receipt_kind,'')='预收款'
+                )
+                AND {receipt_clause}
+              UNION ALL
+              SELECT CONCAT('W-',ledger.id) AS id,
+                     DATE(ledger.created_at) AS rechargeDate,
+                     customer.name AS customerName,
+                     NULL AS cardNo, s.name AS store,
+                     ledger.delta AS rechargeAmount,
+                     0 AS giftAmount,
+                     COALESCE(ledger.payment_method,'线下登记')
+                       AS paymentMethod,
+                     COALESCE(operator_user.username,'未记录') AS operator
+              FROM wallet_ledger ledger
+              JOIN customers customer
+                ON customer.customer_id=ledger.customer_id
+              JOIN stores s ON s.store_id=ledger.store_id
+              LEFT JOIN user_accounts operator_user
+                ON operator_user.user_id=ledger.operator_user_id
+              WHERE ledger.tenant_id=%s AND ledger.delta > 0
+                AND ledger.reason='ERP手工充值'
+                AND {ledger_clause}
+            ) recharge
+            ORDER BY rechargeDate DESC, id DESC
+            """,
+            [
+                tenant_id,
+                *receipt_params,
+                tenant_id,
+                *ledger_params,
+            ],
+        )
+    elif resource == "c3-payment-summary-analysis":
+        clause, params = _store_scope(user, "expense")
+        rows = _rows(
+            connection,
+            f"""
+            SELECT MIN(expense.expense_id) AS id,
+                   DATE(expense.pay_date) AS paymentDate,
+                   expense.expense_type AS paymentType,
+                   COALESCE(applicant.username,'未记录') AS payee,
+                   s.name AS store,
+                   COALESCE(ext.payout_type,expense.pay_method,'未指定')
+                     AS fundAccount,
+                   COUNT(expense.expense_id) AS documentCount,
+                   COALESCE(SUM(expense.apply_amount),0) AS paymentAmount,
+                   COALESCE(SUM(expense.apply_amount),0) AS auditedAmount
+            FROM expense_orders expense
+            JOIN finance_expense_extensions ext
+              ON ext.expense_id=expense.expense_id
+            JOIN stores s ON s.store_id=expense.store_id
+            LEFT JOIN user_accounts applicant
+              ON applicant.user_id=ext.applicant_user_id
+            WHERE expense.tenant_id=%s AND expense.deleted_at IS NULL
+              AND expense.status='已打款' AND {clause}
+            GROUP BY DATE(expense.pay_date),expense.store_id,
+                     expense.expense_type,
+                     COALESCE(applicant.username,'未记录'),
+                     COALESCE(ext.payout_type,expense.pay_method,'未指定')
+            ORDER BY paymentAmount DESC
+            """,
+            [tenant_id, *params],
+        )
+    elif resource == "c4-fund-income-expense-balance":
+        receipt_clause, receipt_params = _store_scope(user, "receipt")
+        refund_clause, refund_params = _store_scope(user, "refund")
+        expense_clause, expense_params = _store_scope(user, "expense")
+        transactions = _rows(
+            connection,
+            f"""
+            SELECT tx.statDate, tx.storeId, tx.store, tx.fundAccount,
+                   SUM(tx.incomeAmount) AS incomeAmount,
+                   SUM(tx.expenseAmount) AS expenseAmount
+            FROM (
+              SELECT DATE(receipt.received_at) AS statDate,
+                     receipt.store_id AS storeId, s.name AS store,
+                     COALESCE(receipt.payment_method,'未指定资金账户')
+                       AS fundAccount,
+                     receipt.amount AS incomeAmount,
+                     CAST(0 AS DECIMAL(20,4)) AS expenseAmount
+              FROM finance_receipts receipt
+              JOIN stores s ON s.store_id=receipt.store_id
+              WHERE receipt.tenant_id=%s
+                AND receipt.status IN ('审核通过','已审核')
+                AND {receipt_clause}
+              UNION ALL
+              SELECT DATE(refund.pay_date), refund.store_id, s.name,
+                     COALESCE(refund.pay_method,'未指定资金账户'),
+                     CAST(0 AS DECIMAL(20,4)),
+                     COALESCE(refund.actual_amount,refund.apply_amount)
+              FROM refund_orders refund
+              JOIN stores s ON s.store_id=refund.store_id
+              WHERE refund.tenant_id=%s AND refund.deleted_at IS NULL
+                AND refund.status='已退款' AND {refund_clause}
+              UNION ALL
+              SELECT DATE(expense.pay_date), expense.store_id, s.name,
+                     COALESCE(ext.payout_type,expense.pay_method,
+                              '未指定资金账户'),
+                     CAST(0 AS DECIMAL(20,4)), expense.apply_amount
+              FROM expense_orders expense
+              JOIN finance_expense_extensions ext
+                ON ext.expense_id=expense.expense_id
+              JOIN stores s ON s.store_id=expense.store_id
+              WHERE expense.tenant_id=%s AND expense.deleted_at IS NULL
+                AND expense.status='已打款' AND {expense_clause}
+            ) tx
+            GROUP BY tx.statDate, tx.storeId, tx.store, tx.fundAccount
+            ORDER BY tx.statDate, tx.storeId, tx.fundAccount
+            """,
+            [
+                tenant_id,
+                *receipt_params,
+                tenant_id,
+                *refund_params,
+                tenant_id,
+                *expense_params,
+            ],
+        )
+        balances: dict[tuple, Decimal] = defaultdict(Decimal)
+        for index, row in enumerate(transactions, 1):
+            key = (row["storeId"], row["fundAccount"])
+            opening = balances[key]
+            income = Decimal(str(row.get("incomeAmount") or 0))
+            expense = Decimal(str(row.get("expenseAmount") or 0))
+            closing = opening + income - expense
+            balances[key] = closing
+            row.update(
+                {
+                    "id": index,
+                    "openingBalance": opening,
+                    "closingBalance": closing,
+                }
+            )
+            row.pop("storeId", None)
+        rows = list(reversed(transactions))
+    elif resource == "c7-store-income-cost-statistics":
+        receipt_clause, receipt_params = _store_scope(user, "receipt")
+        refund_clause, refund_params = _store_scope(user, "refund")
+        expense_clause, expense_params = _store_scope(user, "expense")
+        rows = _rows(
+            connection,
+            f"""
+            SELECT MIN(summary.id) AS id, summary.statPeriod,
+                   summary.store,
+                   SUM(summary.incomeAmount) AS incomeAmount,
+                   SUM(summary.costAmount) AS costAmount,
+                   SUM(summary.incomeAmount)-SUM(summary.costAmount)
+                     AS grossProfit,
+                   ROUND(
+                     (
+                       SUM(summary.incomeAmount)-SUM(summary.costAmount)
+                     )*100/NULLIF(SUM(summary.incomeAmount),0),
+                     2
+                   ) AS grossMargin
+            FROM (
+              SELECT receipt.receipt_id AS id,
+                     DATE_FORMAT(receipt.received_at,'%%Y-%%m')
+                       AS statPeriod,
+                     s.name AS store, receipt.amount AS incomeAmount,
+                     CAST(0 AS DECIMAL(20,4)) AS costAmount
+              FROM finance_receipts receipt
+              JOIN stores s ON s.store_id=receipt.store_id
+              WHERE receipt.tenant_id=%s
+                AND receipt.status IN ('审核通过','已审核')
+                AND {receipt_clause}
+              UNION ALL
+              SELECT refund.refund_id,
+                     DATE_FORMAT(refund.pay_date,'%%Y-%%m'), s.name,
+                     -COALESCE(refund.actual_amount,refund.apply_amount),
+                     CAST(0 AS DECIMAL(20,4))
+              FROM refund_orders refund
+              JOIN stores s ON s.store_id=refund.store_id
+              WHERE refund.tenant_id=%s AND refund.deleted_at IS NULL
+                AND refund.status='已退款' AND {refund_clause}
+              UNION ALL
+              SELECT expense.expense_id,
+                     DATE_FORMAT(expense.pay_date,'%%Y-%%m'), s.name,
+                     CAST(0 AS DECIMAL(20,4)), expense.apply_amount
+              FROM expense_orders expense
+              JOIN stores s ON s.store_id=expense.store_id
+              WHERE expense.tenant_id=%s AND expense.deleted_at IS NULL
+                AND expense.status='已打款' AND {expense_clause}
+            ) summary
+            GROUP BY summary.statPeriod, summary.store
+            ORDER BY summary.statPeriod DESC, summary.store
+            """,
+            [
+                tenant_id,
+                *receipt_params,
+                tenant_id,
+                *refund_params,
+                tenant_id,
+                *expense_params,
+            ],
+        )
+    elif resource == "c8-product-gross-profit-analysis":
+        clause, params = _store_scope(user, "sale")
+        rows = _rows(
+            connection,
+            f"""
+            SELECT MIN(line.id) AS id,
+                   DATE_FORMAT(sale.created_at,'%%Y-%%m') AS statPeriod,
+                   s.name AS store, item.item_id AS productCode,
+                   COALESCE(item.name,line.name) AS productName,
+                   item.cat AS productCategory,
+                   SUM(line.qty) AS saleQuantity,
+                   SUM(
+                     COALESCE(ext.discount_price,
+                       line.unit_price*COALESCE(line.discount,1))*line.qty
+                   ) AS saleAmount,
+                   SUM(COALESCE(item.cost_price,0)*line.qty) AS costAmount,
+                   SUM(
+                     (
+                       COALESCE(ext.discount_price,
+                         line.unit_price*COALESCE(line.discount,1))
+                       -COALESCE(item.cost_price,0)
+                     )*line.qty
+                   ) AS grossProfit,
+                   ROUND(
+                     SUM(
+                       (
+                         COALESCE(ext.discount_price,
+                           line.unit_price*COALESCE(line.discount,1))
+                         -COALESCE(item.cost_price,0)
+                       )*line.qty
+                     )*100/
+                     NULLIF(
+                       SUM(
+                         COALESCE(ext.discount_price,
+                           line.unit_price*COALESCE(line.discount,1))
+                         *line.qty
+                       ),
+                       0
+                     ),
+                     2
+                   ) AS grossMargin
+            FROM orders sale
+            JOIN order_items line ON line.order_no=sale.order_no
+            JOIN stores s ON s.store_id=sale.store_id
+            LEFT JOIN sales_order_item_extensions ext
+              ON ext.order_item_id=line.id
+            LEFT JOIN items item ON item.item_id=line.item_id
+            WHERE sale.tenant_id=%s AND sale.deleted_at IS NULL
+              AND sale.order_status NOT IN ('已取消','已删除','已退款')
+              AND {clause}
+            GROUP BY DATE_FORMAT(sale.created_at,'%%Y-%%m'),
+                     sale.store_id,s.name,item.item_id,
+                     COALESCE(item.name,line.name),item.cat
+            ORDER BY statPeriod DESC,saleAmount DESC
+            """,
+            [tenant_id, *params],
+        )
+    elif resource == "c13-receipt-refund-summary":
+        receipt_clause, receipt_params = _store_scope(user, "receipt")
+        refund_clause, refund_params = _store_scope(user, "refund")
+        rows = _rows(
+            connection,
+            f"""
+            SELECT MIN(summary.id) AS id, summary.statPeriod,
+                   summary.store,
+                   SUM(summary.receiptCount) AS receiptCount,
+                   SUM(summary.receiptAmount) AS receiptAmount,
+                   SUM(summary.refundCount) AS refundCount,
+                   SUM(summary.refundAmount) AS refundAmount,
+                   SUM(summary.receiptAmount)-SUM(summary.refundAmount)
+                     AS netReceiptAmount
+            FROM (
+              SELECT receipt.receipt_id AS id,
+                     DATE(receipt.received_at) AS statPeriod,
+                     s.name AS store, 1 AS receiptCount,
+                     receipt.amount AS receiptAmount,
+                     0 AS refundCount,
+                     CAST(0 AS DECIMAL(20,4)) AS refundAmount
+              FROM finance_receipts receipt
+              JOIN stores s ON s.store_id=receipt.store_id
+              WHERE receipt.tenant_id=%s
+                AND receipt.status IN ('审核通过','已审核')
+                AND {receipt_clause}
+              UNION ALL
+              SELECT refund.refund_id,DATE(refund.pay_date),s.name,
+                     0,CAST(0 AS DECIMAL(20,4)),1,
+                     COALESCE(refund.actual_amount,refund.apply_amount)
+              FROM refund_orders refund
+              JOIN stores s ON s.store_id=refund.store_id
+              WHERE refund.tenant_id=%s AND refund.deleted_at IS NULL
+                AND refund.status='已退款' AND {refund_clause}
+            ) summary
+            GROUP BY summary.statPeriod,summary.store
+            ORDER BY summary.statPeriod DESC,summary.store
+            """,
+            [tenant_id, *receipt_params, tenant_id, *refund_params],
         )
     elif resource == "h1-customer-service-records":
         clause, params = _store_scope(user, "request")
@@ -1454,10 +2035,15 @@ def report_module(connection, user: dict, resource: str) -> dict:
             [tenant_id, *params],
         )
 
+    acceptance_seed = False
+    if not rows:
+        rows = operational_acceptance_rows(connection, user, "REPORT", resource)
+        acceptance_seed = bool(rows)
     return {
         "list": rows,
         "total": len(rows),
         "source": "mysql",
+        "acceptanceSeed": acceptance_seed,
         "implemented": bool(rows) or resource in {
             "s1-sales-ranking",
             "s13-sales-performance",
@@ -1470,7 +2056,14 @@ def report_module(connection, user: dict, resource: str) -> dict:
             "f3-monthly-reservation-details",
             "f4-monthly-checkout-details",
             "c0-daily-operation",
+            "c0-monthly-operation",
+            "c1-member-recharge-summary",
             "c2-receipt-settlement-type-summary",
+            "c3-payment-summary-analysis",
+            "c4-fund-income-expense-balance",
+            "c7-store-income-cost-statistics",
+            "c8-product-gross-profit-analysis",
+            "c13-receipt-refund-summary",
             "c16-receipt-and-settlement-types",
             "h1-customer-service-records",
             "h2-baby-vital-sign-statistics",

@@ -6,7 +6,8 @@ const state = {
     withoutAnimation: false
   },
   device: 'desktop',
-  size: Cookies.get('size') || 'medium'
+  size: Cookies.get('size') || 'medium',
+  currentStoreId: localStorage.getItem('erpCurrentStoreId') || 'all'
 }
 
 const mutations = {
@@ -30,6 +31,10 @@ const mutations = {
   SET_SIZE: (state, size) => {
     state.size = size
     Cookies.set('size', size)
+  },
+  SET_CURRENT_STORE: (state, storeId) => {
+    state.currentStoreId = String(storeId || 'all')
+    localStorage.setItem('erpCurrentStoreId', state.currentStoreId)
   }
 }
 
@@ -45,6 +50,9 @@ const actions = {
   },
   setSize({ commit }, size) {
     commit('SET_SIZE', size)
+  },
+  setCurrentStore({ commit }, storeId) {
+    commit('SET_CURRENT_STORE', storeId)
   }
 }
 

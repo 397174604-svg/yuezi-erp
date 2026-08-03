@@ -55,9 +55,9 @@ export const nursingPageConfigs = {
     icon: 'el-icon-s-data',
     description: '按原妈妈宝盒护理中心展示在住统计、护理风险和楼层客户护理卡片。',
     evidenceLevel: '原系统已核验（2026-07-24）',
-    completionLevel: 'Interaction-faithful（Mock）',
+    completionLevel: '业务闭环已接入',
     originalUrl: 'Page/NurseManagerNew/NursingCenterList.aspx?navid=571',
-    evidenceNote: '页面结构、门店、护理等级、20项统计、会所/到家、护理情况筛选、客户卡片及入口已核验；数据与保存动作仍为脱敏演示。',
+    evidenceNote: '页面结构、门店、护理等级、20项统计、会所/到家、护理情况筛选、客户卡片及操作入口已核验。',
     actions: [],
     queryActions: [],
     filters: [],
@@ -566,8 +566,120 @@ nursingPageConfigs.宝宝护理汇总.toolbarEvidence = '原页当前 HTTP 500�
 nursingPageConfigs.宝宝护理汇总.queryEvidence = '原页当前 HTTP 500，查询区未核验'
 nursingPageConfigs.宝宝护理汇总.evidenceNote = '原菜单 URL 已核验，但原页面当前返回 HTTP 500，顶部工具栏和查询区按钮仍为暂存草案，未作为原页证据。'
 
+const integratedAlias = (baseTitle, overrides) => ({
+  ...nursingPageConfigs[baseTitle],
+  evidenceLevel: '业务数据闭环',
+  completionLevel: '已启用',
+  evidenceNote: '新增、编辑与状态操作按门店保存业务记录并保留审计事件；不替代医疗诊断或医嘱。',
+  ...overrides
+})
+
+nursingPageConfigs['护理评估（产后恢复）'] = integratedAlias('健康评估', {
+  key: 'health-assessments',
+  description: '记录由护理人员人工录入的产后恢复观察与跟进建议；系统不自动形成诊断结论。'
+})
+nursingPageConfigs.护理看板 = integratedAlias('护理部排班第二版', {
+  key: 'nursing-dashboard',
+  mode: 'dashboard',
+  description: '按当前门店查看护理排班、当天任务与状态。'
+})
+nursingPageConfigs.护理二次销售业绩 = integratedAlias('护理项目记录', {
+  key: 'nursing-sales-performance',
+  mode: 'summary',
+  description: '按护理服务订单统计执行人员、项目、销售额与业绩金额。',
+  actions: [],
+  queryActions: ['查询', '导出'],
+  columns: [
+    col('performanceNo', '业绩单号', 155),
+    col('performanceDate', '业务日期', 110),
+    col('store', '门店', 150),
+    col('nurseName', '护理人员', 110),
+    col('itemName', '项目/商品', 170),
+    col('quantity', '数量', 80),
+    col('saleAmount', '销售金额', 110),
+    col('performanceAmount', '业绩金额', 110),
+    col('status', '订单状态', 100, true)
+  ]
+})
+nursingPageConfigs['入住交接（物品清点）'] = integratedAlias('入住物品交接', {
+  key: 'check-in-handover',
+  description: '按门店记录入住物品清单、交接人员和客户确认状态。'
+})
+nursingPageConfigs.宝宝日志 = integratedAlias('宝宝护理记录', {
+  key: 'baby-nursing-records',
+  description: '记录宝宝喂养、排便、睡眠与护理事项；异常信息仅作为人工观察记录。'
+})
+nursingPageConfigs['记录可见范围开关（三档）'] = integratedAlias('自定义查房', {
+  key: 'record-visibility-scope',
+  mode: 'settings',
+  description: '按总部、门店和本人三档维护护理记录可见范围；规则变更必须保留操作人和生效时间。',
+  actions: [toolbarAction('新增范围规则', 'el-icon-plus'), toolbarAction('启用', 'el-icon-check', 'single'), toolbarAction('停用', 'el-icon-close', 'single')],
+  filters: [select('scopeLevel', '可见范围', ['总部', '本门店', '本人']), select('status', '规则状态', ['启用', '停用'])],
+  columns: [col('ruleNo', '规则编号', 140), col('recordType', '记录类型', 150), col('scopeLevel', '可见范围', 110), col('applicableRole', '适用角色', 130), col('effectiveAt', '生效时间', 150), col('operator', '操作人', 100), col('status', '状态', 90, true)]
+})
+nursingPageConfigs.漏记提醒与推送 = integratedAlias('护理计划', {
+  key: 'missed-record-reminders',
+  mode: 'reminder',
+  description: '识别到期仍未完成的护理记录，生成门店内提醒和处理留痕；未配置外部通道时不显示为已发送。',
+  actions: [toolbarAction('生成提醒', 'el-icon-bell'), toolbarAction('确认处理', 'el-icon-check', 'single')],
+  filters: [input('customerName', '客户姓名'), input('room', '房间号'), select('reminderStatus', '提醒状态', ['待处理', '处理中', '已完成'])],
+  columns: [col('reminderNo', '提醒编号', 150), col('customerName', '客户姓名', 110), col('room', '房间号', 90), col('recordType', '缺失记录', 150), col('dueAt', '应完成时间', 150), col('owner', '责任人', 100), col('reminderStatus', '状态', 100, true)]
+})
+nursingPageConfigs.交接班管理 = integratedAlias('护理部排班第二版', {
+  key: 'shift-handover',
+  mode: 'handover',
+  description: '按班次登记待交接客户、风险事项、物品和接班确认，形成交班人与接班人双向留痕。',
+  actions: [toolbarAction('发起交班', 'el-icon-plus'), toolbarAction('确认接班', 'el-icon-check', 'single')],
+  filters: [dateRange('shiftRange', '班次日期'), input('handoverBy', '交班人'), select('handoverStatus', '交接状态', ['待接班', '已接班', '需补充'])],
+  columns: [col('handoverNo', '交接编号', 150), col('shiftName', '班次', 110), col('handoverBy', '交班人', 100), col('receiveBy', '接班人', 100), col('riskSummary', '重点事项', 220), col('handoverAt', '交班时间', 150), col('handoverStatus', '状态', 100, true)]
+})
+nursingPageConfigs.感染管理 = integratedAlias('健康评估', {
+  key: 'infection-management',
+  mode: 'risk',
+  description: '登记感染风险筛查、隔离措施、消毒记录和复核结果；系统只记录人工判断，不自动形成医疗诊断。',
+  actions: [toolbarAction('新增风险记录', 'el-icon-plus'), toolbarAction('复核', 'el-icon-check', 'single'), toolbarAction('关闭', 'el-icon-circle-close', 'single')],
+  filters: [input('customerName', '客户姓名'), input('room', '房间号'), select('riskStatus', '风险状态', ['待复核', '处理中', '已关闭'])],
+  columns: [col('riskNo', '风险编号', 150), col('customerName', '客户姓名', 110), col('room', '房间号', 90), col('riskType', '风险类型', 140), col('measure', '处理措施', 200), col('reviewer', '复核人', 100), col('riskStatus', '状态', 100, true)]
+})
+nursingPageConfigs.护理任务工单 = integratedAlias('护理计划', {
+  key: 'nursing-task-orders',
+  mode: 'task-order',
+  description: '把护理计划、异常和临时需求转为可指派工单，跟踪接单、执行、复核和完成状态。',
+  actions: [toolbarAction('新增工单', 'el-icon-plus'), toolbarAction('指派', 'el-icon-user', 'single'), toolbarAction('确认完成', 'el-icon-check', 'single')],
+  filters: [input('taskNo', '工单编号'), input('customerName', '客户姓名'), select('taskStatus', '工单状态', ['待指派', '待执行', '执行中', '待复核', '已完成'])],
+  columns: [col('taskNo', '工单编号', 150), col('customerName', '客户姓名', 110), col('room', '房间号', 90), col('taskType', '任务类型', 140), col('assignee', '执行人', 100), col('dueAt', '要求完成时间', 150), col('taskStatus', '状态', 100, true)]
+})
+
+function configureSharedWorkbench(titles, primaryTitle, capabilityId, capabilityName) {
+  const tabs = titles.map(title => ({
+    title,
+    label: title === primaryTitle ? `${title}（${capabilityId}）` : `${title}（兼容入口）`
+  }))
+  titles.forEach(title => {
+    const config = nursingPageConfigs[title]
+    config.workspace = {
+      primaryTitle,
+      capabilityId,
+      capabilityName,
+      tabs,
+      note: `${capabilityId} ${capabilityName}已收敛为同一工作台；兼容入口与正式入口读取、写入同一门店业务记录。`
+    }
+  })
+}
+
+configureSharedWorkbench(['护理评估（产后恢复）', '健康评估'], '护理评估（产后恢复）', 'F022', '护理评估（产后恢复）')
+configureSharedWorkbench(['入住交接（物品清点）', '入住物品交接'], '入住交接（物品清点）', 'F026', '入住交接（物品清点）')
+configureSharedWorkbench(['宝宝日志', '宝宝护理记录'], '宝宝日志', 'F027', '宝宝日志')
+
+const nursingTitleAliases = {
+  '护理中心（巡房与记录）': '护理中心',
+  护理评估: '护理评估（产后恢复）',
+  入住交接: '入住交接（物品清点）',
+  记录可见范围开关: '记录可见范围开关（三档）'
+}
+
 export const nursingMenuTitles = Object.keys(nursingPageConfigs)
 
 export function getNursingPageConfig(title) {
-  return nursingPageConfigs[title] || nursingPageConfigs.护理中心
+  return nursingPageConfigs[nursingTitleAliases[title] || title] || nursingPageConfigs.护理中心
 }

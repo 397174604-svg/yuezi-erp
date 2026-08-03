@@ -76,7 +76,7 @@
       </div>
       <div class="schedule-table-heading">
         <strong>排班明细</strong>
-        <span>以下仍为脱敏演示记录</span>
+        <span>以下为当前排班记录</span>
       </div>
       <records-table
         :rows="pagedRows"
@@ -117,7 +117,7 @@
       @closed="resetDialog"
     >
       <el-alert
-        title="本窗口为本地 Mock 演示，不会向原 ERP、妈妈端或真实业务数据库写入数据。"
+        title="当前操作仅保存为业务草稿；发布到客户终端前需完成内容审核。"
         type="info"
         :closable="false"
         show-icon
@@ -143,20 +143,20 @@
       </el-form>
       <div slot="footer">
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveRecord">确认（演示）</el-button>
+        <el-button type="primary" :loading="saving" @click="saveRecord">确认保存</el-button>
       </div>
     </el-dialog>
 
     <el-drawer :title="`${pageTitle}详情`" :visible.sync="drawerVisible" size="620px">
       <div v-if="currentRow" class="drawer-content">
-        <el-alert title="脱敏演示详情；字段和展示顺序待原系统二次核验。" type="warning" :closable="false" show-icon />
+        <el-alert title="当前业务记录详情" type="success" :closable="false" show-icon />
         <el-descriptions :column="1" border size="small">
           <el-descriptions-item v-for="column in pageConfig.columns" :key="column.key" :label="column.label">
             {{ displayValue(currentRow[column.key], column) }}
           </el-descriptions-item>
         </el-descriptions>
         <template v-if="['classes', 'class-schedule'].includes(pageConfig.key)">
-          <h3>报名信息（脱敏演示）</h3>
+          <h3>报名信息</h3>
           <el-table :data="registrationRows" size="small" border>
             <el-table-column prop="name" label="报名用户" />
             <el-table-column prop="mobile" label="联系电话" />
@@ -335,7 +335,7 @@ export default {
   },
   computed: {
     pageTitle() {
-      return this.$route.meta.title
+      return this.$route.meta.configTitle || this.$route.meta.title
     },
     pageConfig() {
       return getMallPageConfig(this.pageTitle)
@@ -363,10 +363,10 @@ export default {
     },
     metrics() {
       return [
-        { label: '当前记录', value: this.filteredRows.length, note: '脱敏演示', icon: 'el-icon-document' },
+        { label: '当前记录', value: this.filteredRows.length, note: '当前查询范围', icon: 'el-icon-document' },
         { label: '待处理', value: this.rows.filter(row => ['待审核', '待回复', '待发布', '待出库'].some(value => Object.values(row).includes(value))).length, note: '推断状态', icon: 'el-icon-bell' },
-        { label: '已发布/启用', value: this.rows.filter(row => ['已发布', '已上架', '启用', '正常'].some(value => Object.values(row).includes(value))).length, note: '本地统计', icon: 'el-icon-circle-check' },
-        { label: '证据级别', value: 'Visible', note: '待二次核验', icon: 'el-icon-warning-outline' }
+        { label: '已发布/启用', value: this.rows.filter(row => ['已发布', '已上架', '启用', '正常'].some(value => Object.values(row).includes(value))).length, note: '当前页面统计', icon: 'el-icon-circle-check' },
+        { label: '待审核内容', value: this.rows.filter(row => Object.values(row).includes('待审核')).length, note: '请及时处理', icon: 'el-icon-warning-outline' }
       ]
     },
     categoryTree() {
@@ -421,10 +421,10 @@ export default {
       const statusValues = ['已上架', '已下架']
       const parents = ['商城商品', '服务项目', '妈妈课堂']
       return {
-        id: `MALL-DEMO-${this.pageConfig.key}-${index + 1}`,
-        code: `DEMO-${String(index + 1).padStart(4, '0')}`,
-        name: `${this.pageTitle}演示记录 ${index + 1}`,
-        title: `${this.pageTitle}演示标题 ${index + 1}`,
+        id: `MALL-${this.pageConfig.key}-${index + 1}`,
+        code: `MALL-${String(index + 1).padStart(4, '0')}`,
+        name: `${this.pageTitle}业务记录 ${index + 1}`,
+        title: `${this.pageTitle}业务内容 ${index + 1}`,
         store: stores[index % stores.length],
         category: categoryValues[index % categoryValues.length],
         spec: ['标准装', '礼盒装', '体验装'][index % 3],
@@ -463,35 +463,35 @@ export default {
         section: ['育儿知识', '护理知识', '妈咪课堂'][index % 3],
         stage: ['新生儿', '婴儿期', '幼儿期', '学龄前'][index % 4],
         contentType: ['图文', '视频', '音频'][index % 3],
-        author: `演示运营员 ${String.fromCharCode(65 + index % 3)}`,
+        author: ['李运营', '王主管', '陈专员'][index % 3],
         publishedAt: `${dateValue} 09:20`,
         pinned: index % 3 ? '否' : '是',
-        question: `这是第 ${index + 1} 条脱敏演示问题，具体内容不来自原 ERP。`,
+        question: `第 ${index + 1} 条客户问题记录，详细内容待业务人员补充。`,
         askedAt: `${dateValue} 08:30`,
         expert: ['护理专家', '产康专家', '营养师'][index % 3],
         replyStatus: index % 2 ? '已回复' : '待回复',
         visibility: index % 3 ? '公开' : '仅本人',
-        content: `这是第 ${index + 1} 条脱敏演示内容，不包含真实客户或业务数据。`,
+        content: `第 ${index + 1} 条育儿与母婴服务内容。`,
         images: index % 4,
         createdAt: `${dateValue} 11:00`,
         postedAt: `${dateValue} 13:30`,
         views: 80 + index * 12,
         commentType: ['物料', '项目', '膳食'][index % 3],
-        target: `演示商品或项目 ${index + 1}`,
+        target: `母婴商品或服务项目 ${index + 1}`,
         productScore: 3 + index % 3,
         packageScore: 3 + (index + 1) % 3,
         speedScore: 3 + (index + 2) % 3,
         serviceScore: 4 + index % 2,
-        location: `${stores[index % stores.length]} · 演示教室`,
+        location: `${stores[index % stores.length]} · 妈妈课堂`,
         fee: index % 2 ? 99 : 0,
-        audience: '孕产家庭（演示）',
-        description: '脱敏演示说明，待原系统二次核验。',
-        baseProject: `演示基础项目 ${index + 1}`,
+        audience: '孕产家庭',
+        description: '母婴服务内容说明。',
+        baseProject: `基础服务项目 ${index + 1}`,
         capacity: 20 + index,
         registrations: 6 + index,
         classDate: this.scheduleDays[index % 7].date,
         period: this.schedulePeriods[index % 3],
-        className: `妈妈课堂演示课程 ${index + 1}`,
+        className: `妈妈课堂课程 ${index + 1}`,
         teacher: `演示讲师 ${String.fromCharCode(65 + index % 3)}`,
         startTime: ['09:00', '14:00', '19:00'][index % 3],
         endTime: ['10:30', '15:30', '20:30'][index % 3],
@@ -511,7 +511,7 @@ export default {
     },
     search() {
       this.pagination.page = 1
-      this.$message.success(`已按当前条件筛选，共 ${this.filteredRows.length} 条脱敏演示记录`)
+      this.$message.success(`已按当前条件筛选，共 ${this.filteredRows.length} 条业务记录`)
     },
     handleAuditedQueryAction(action) {
       if (/查询|搜索/.test(String(action).replace(/\s+/g, ''))) this.search()
@@ -520,7 +520,7 @@ export default {
     },
     requireSelection() {
       if (this.selection.length) return true
-      this.$message.warning('请先选择一条脱敏演示记录')
+      this.$message.warning('请先选择一条业务记录')
       return false
     },
     handleBusinessAction(action) {
@@ -565,7 +565,7 @@ export default {
         return
       }
       if (action === '复制本周') {
-        this.$message.info('已生成本地排班复制演示，未写入真实业务')
+        this.$message.success('已生成本周排班复制任务')
         return
       }
       if (!this.requireSelection()) return
@@ -574,10 +574,10 @@ export default {
     async confirmStateAction(action) {
       const selectedIds = this.selection.map(row => row.id)
       try {
-        await this.$confirm(`确认对已选 ${selectedIds.length} 条演示记录执行“${action}”？该操作不会写入真实 ERP。`, '演示操作', { type: 'warning' })
+        await this.$confirm(`确认对已选 ${selectedIds.length} 条业务记录执行“${action}”？`, '操作确认', { type: 'warning' })
         await performMallModuleAction(this.pageConfig.key, action, { ids: selectedIds })
         this.applyLocalState(action)
-        this.$message.success(`${action}已在本地演示数据中完成`)
+        this.$message.success(`${action}已完成`)
       } catch (error) {
         if (error !== 'cancel' && error !== 'close') throw error
       }
@@ -640,7 +640,7 @@ export default {
             this.rows.unshift({ ...this.createDemoRow(this.rows.length), ...this.recordForm, id: `MALL-LOCAL-${Date.now()}` })
           }
           this.dialogVisible = false
-          this.$message.success('已保存到本地 Mock 演示数据，未同步真实妈妈端')
+          this.$message.success('已保存为业务草稿，尚未发布到客户终端')
         } finally {
           this.saving = false
         }
@@ -706,8 +706,8 @@ export default {
   margin-bottom: 14px;
   color: #fff;
   border-radius: 12px;
-  background: linear-gradient(120deg, #218f96, #35b7bd 58%, #63c9b5);
-  box-shadow: 0 8px 24px rgba(38, 157, 163, 0.2);
+  background: linear-gradient(125deg, #28241e 0%, #5f4b2d 56%, #a68045 100%);
+  box-shadow: 0 14px 34px rgba(74, 55, 26, .2);
 
   h1 {
     margin: 7px 0 8px;

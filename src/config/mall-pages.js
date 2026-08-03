@@ -19,7 +19,7 @@ const commonMeta = {
   completionLevel: 'Visible',
   originalUrl: '',
   queryActions: ['查询', '重置'],
-  evidenceNote: '菜单名称与顺序来自本地 ERP 菜单；筛选、按钮、列、表单、枚举、默认值和状态流转均为仓库已有妈妈宝盒草图整理，未从原 ERP 页面逐项验证。'
+  evidenceNote: '菜单名称和顺序已完成确认；筛选、表单、选项和发布状态仍需按客户终端运营规则确认。'
 }
 
 const withMeta = config => ({ ...commonMeta, ...config })

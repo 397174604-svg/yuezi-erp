@@ -1,6 +1,7 @@
 const customerStatuses = ['意向A', '意向B', '意向C', '意向D', '意向E', '流失客户', '散客客户', '同意签合同', '已签合同但未审核', '已签合同但未入住', '已订房', '已入住', '已退房已结账', '已退房但未结账']
 const customerSources = ['客户介绍', '住附近', '电话来访', '大众点评', '美团咨询', '地推拓客', '抖音咨询', '小红书咨询', '自然上门', '网络搜索', '市场渠道', '二胎入住', '内部资源']
 const stores = ['中心广场旗舰店', '黄河路轻奢店']
+export const leadFollowStatuses = ['待跟进', '跟进中', '已转化', '已关闭']
 
 const input = (key, label, placeholder = '') => ({ key, label, type: 'input', placeholder })
 const select = (key, label, options) => ({ key, label, type: 'select', options })
@@ -15,7 +16,7 @@ const customerBaseColumns = [
   col('babyName', '宝宝姓名', 100), col('wechat', '微信(QQ)', 115), col('memberCard', '会员卡号', 120), col('balance', '账户余额', 100),
   col('points', '积分余额', 90), col('creator', '登记人', 90), col('lastEditor', '最后编辑人', 100), col('status', '客户状态', 135, true),
   col('source', '客户来源', 105), col('salesperson', '销售员', 90), col('intendedStore', '意向分店', 145), col('stayStore', '入住分店', 145),
-  col('createdAt', '录入时间', 150), col('dueDate', '预产期', 110), col('followedAt', '跟踪时间', 150), col('followContent', '跟踪内容', 180),
+  col('createdAt', '录入时间', 150), col('dueDate', '预产期', 110), col('followedAt', '跟进时间', 150), col('followContent', '跟进内容', 180),
   col('appointment', '预约参观', 100), col('area', '客户区域', 100), col('companion', '陪护人', 90), col('companionPhone', '陪护电话', 120),
   col('firstVisitAt', '到店时间', 150), col('tags', '客户标签', 150)
 ]
@@ -26,39 +27,54 @@ const customerFilters = [
 ]
 
 const followForm = [
-  input('customerName', '客户名称'), date('followedAt', '跟踪时间', 'datetime'), select('status', '跟踪状态', customerStatuses.slice(0, 8)),
-  select('followType', '跟踪类型', ['销售跟踪', '咨询跟踪', '回访跟踪', '探访跟踪', '投诉跟踪']),
-  select('contactType', '接触方式', ['微信交流', '店外面谈', '电话交流', '来店参观']), date('nextFollowAt', '下一跟踪时间', 'datetime'), textarea('content', '跟踪信息')
+  input('customerName', '客户名称'), date('followedAt', '跟进时间', 'datetime'), select('followStatus', '跟进状态', leadFollowStatuses),
+  select('followType', '跟进类型', ['销售跟进', '咨询跟进', '回访跟进', '探访跟进', '投诉跟进']),
+  select('contactType', '接触方式', ['微信交流', '店外面谈', '电话交流', '来店参观']), date('nextFollowAt', '下次跟进时间', 'datetime'), textarea('content', '跟进内容')
 ]
 
 export const customerPageConfigs = {
+  '业务跟踪台': {
+    key: 'customers', icon: 'el-icon-data-line', description: '按真实客户状态展示销售漏斗、负责人和下一步跟进重点，不使用演示人数。',
+    actions: ['客户跟进', '导出'],
+    stages: ['全部', '意向客户', '进店客户', '已签约客户', '待入住客户', '已入住客户', '已退房客户', '流失客户', '零散客户'],
+    filters: [input('name', '客户姓名'), input('mobile', '手机号'), select('status', '客户状态', customerStatuses), input('salesperson', '销售员'), select('store', '意向分店', stores), dateRange('createdRange', '录入日期'), dateRange('dueRange', '预产期')],
+    columns: [col('name', '客户姓名', 120), col('mobile', '联系电话', 125), col('status', '客户状态', 140, true), col('salesperson', '负责人', 110), col('source', '客户来源', 110), col('intendedStore', '意向门店', 150), col('dueDate', '预产期', 110), col('createdAt', '录入时间', 160), col('contractNo', '合同编号', 145), col('room', '预订房间', 100)],
+    formFields: followForm
+  },
+  '客户标签体系': {
+    key: 'customers', icon: 'el-icon-collection-tag', description: '从真实客户档案归集标签，用于客户分群和精准查询；空标签不会生成演示分群。',
+    actions: ['导出'],
+    filters: [input('name', '客户姓名'), input('mobile', '手机号'), input('tags', '客户标签'), select('status', '客户状态', customerStatuses), select('store', '意向分店', stores)],
+    columns: [col('name', '客户姓名', 120), col('mobile', '联系电话', 125), col('tags', '客户标签', 240), col('status', '客户状态', 140, true), col('source', '客户来源', 110), col('salesperson', '负责人', 110), col('intendedStore', '归属门店', 150), col('createdAt', '录入时间', 160)],
+    formFields: []
+  },
   '线索管理': {
-    key: 'clues', icon: 'el-icon-connection', description: '管理未转化客资，完成分配、跟踪、共享、公海同步与客户转化。',
-    actions: ['添加', '编辑', '删除', '客资分配', '客户跟踪', '线索转让', '分享', '同步公海客户', '转化', '关闭', '导入', '导出'],
-    filters: [input('name', '姓名'), input('wechat', '微信'), input('mobile', '手机号码'), select('followStatus', '跟踪状态', ['未处理', '跟进中', '关闭', '已转化']), input('unfollowedDays', '未跟踪天数'), input('assignee', '分配人'), dateRange('dueRange', '预产日期'), dateRange('createdRange', '录入日期'), select('source', '客户来源', customerSources), input('description', '线索说明')],
-    columns: [col('name', '姓名'), col('mobile', '电话'), col('wechat', '微信'), col('source', '线索来源'), col('salesperson', '业务员'), col('creator', '录入人'), col('followStatus', '跟进状态', 100, true), col('convertStore', '转化分店', 140), col('sharedBy', '共享人'), col('appointment', '预约参观'), col('followCount', '跟踪次数'), col('followedAt', '跟踪时间', 150), col('createdAt', '线索时间', 150), col('dueDate', '预产期'), col('description', '线索说明', 180), col('autoAssigned', '自动分配'), col('convertedCustomer', '转化客户'), col('customerMobile', '客户电话')],
-    formFields: [input('name', '线索姓名'), input('mobile', '手机号码'), input('wechat', '微信'), select('source', '线索来源', customerSources), date('dueDate', '预产日期'), input('assignee', '分配人'), textarea('description', '线索说明')]
+    key: 'clues', icon: 'el-icon-connection', description: '管理未转化客资，完成分配、跟进、共享、公海同步与客户转化。',
+    actions: ['添加', '编辑', '删除', '客资分配', '客户跟进', '线索转让', '分享', '转化', '关闭', '导出'],
+    filters: [input('name', '姓名'), input('wechat', '微信'), input('mobile', '手机号码'), select('followStatus', '跟进状态', leadFollowStatuses), select('store', '归属门店', stores), input('unfollowedDays', '至少未跟进天数'), input('assignee', '分配人'), dateRange('dueRange', '预产日期'), dateRange('createdRange', '录入日期'), select('source', '客户来源', customerSources), input('description', '线索说明')],
+    columns: [col('name', '姓名'), col('mobile', '电话'), col('wechat', '微信'), col('source', '线索来源'), col('salesperson', '业务员'), col('creator', '录入人'), col('store', '归属门店', 140), col('followStatus', '跟进状态', 100, true), col('convertStore', '转化分店', 140), col('sharedBy', '共享人'), col('appointment', '预约参观'), col('followCount', '跟进次数'), col('followedAt', '跟进时间', 150), col('createdAt', '线索时间', 150), col('dueDate', '预产期'), col('description', '线索说明', 180), col('autoAssigned', '自动分配'), col('convertedCustomer', '转化客户'), col('customerMobile', '客户电话')],
+    formFields: [{ ...input('name', '线索姓名'), required: true }, { ...input('mobile', '手机号码'), required: true }, input('wechat', '微信'), { ...select('source', '线索来源', customerSources), required: true }, { ...select('store', '归属门店', stores), required: true }, date('dueDate', '预产日期'), input('assignee', '分配人'), textarea('description', '线索说明')]
   },
   '我的客户': {
-    key: 'my-customers', icon: 'el-icon-user', description: '查看当前账号负责的客户及最近跟踪、到店和预约情况。',
-    actions: ['客户跟踪', '导出'], filters: customerFilters, columns: [...customerBaseColumns, col('autoAssigned', '自动分配')], formFields: followForm
+    key: 'my-customers', icon: 'el-icon-user', description: '查看当前账号负责的客户及最近跟进、到店和预约情况。',
+    actions: ['客户跟进', '导出'], filters: customerFilters, columns: [...customerBaseColumns, col('autoAssigned', '自动分配')], formFields: followForm
   },
   '客户管理': {
     key: 'customers', icon: 'el-icon-s-custom', description: '客户全生命周期总台，贯通合同、结账、分房、欠款和服务消息。',
-    actions: ['添加', '创建合同', '二维码打印', '编辑', '删除', '导入', '导出', '打印', '设置', '客资分配', '回收', '客户跟踪', '结账', '反结账', '欠款授权', '生成采购计划', '转化', '分享'],
+    actions: ['添加', '创建合同', '二维码打印', '编辑', '删除', '导入', '导出', '打印', '设置', '客资分配', '回收', '客户跟进', '结账', '反结账', '欠款授权', '生成采购计划', '转化', '分享'],
     stages: ['全部', '意向客户', '进店客户', '已签约客户', '待入住客户', '已入住客户', '已退房客户', '流失客户', '零散客户'],
     filters: [input('name', '客户姓名'), input('mobile', '手机号'), dateRange('createdRange', '录入日期'), select('isToStore', '是否到店', ['是', '否']), input('wechat', '微信(QQ)'), input('salesperson', '销售员'), dateRange('dueRange', '预产期'), select('store', '意向分店', stores), select('status', '客户状态', customerStatuses), select('source', '客户来源', customerSources), input('creator', '登记人'), input('memo', '备忘录'), input('memberCard', '会员卡号'), checkbox('delivered', '是否分娩')],
     columns: [...customerBaseColumns, col('delivered', '是否分娩'), col('contractNo', '合同编号', 140), col('contractAmount', '合同金额', 115), col('debtAmount', '欠款金额', 105), col('room', '预订房间', 100)],
     formFields: [input('customerName', '客户名称'), input('mobile', '客户电话'), input('amount', '可欠款金额'), select('paymentType', '款项类型', ['合同款', '续房款', '会员充值']), textarea('remark', '操作备注')]
   },
   '跟进记录': {
-    key: 'follow-records', icon: 'el-icon-chat-line-round', description: '统一查询销售、咨询、回访、探访和投诉跟踪记录及未来计划。',
-    actions: ['编辑', '删除', '导出'], filters: [input('follower', '跟进人'), input('customerName', '跟进客户'), input('mobile', '电话'), input('wechat', '微信'), select('store', '意向分店', stores), select('status', '跟踪状态', customerStatuses), select('followType', '跟踪类型', ['销售跟踪', '咨询跟踪', '回访跟踪', '探访跟踪', '投诉跟踪']), select('source', '客户来源', customerSources), dateRange('followRange', '跟踪时间'), checkbox('showSystem', '显示系统跟踪')],
+    key: 'follow-records', icon: 'el-icon-chat-line-round', description: '统一查询销售、咨询、回访、探访和投诉跟进记录及未来计划。',
+    actions: ['编辑', '删除', '导出'], filters: [input('follower', '跟进人'), input('customerName', '跟进客户'), input('mobile', '电话'), input('wechat', '微信'), select('store', '意向分店', stores), select('followStatus', '跟进状态', leadFollowStatuses), select('followType', '跟进类型', ['销售跟进', '咨询跟进', '回访跟进', '探访跟进', '投诉跟进']), select('source', '客户来源', customerSources), dateRange('followRange', '跟进时间'), checkbox('showSystem', '显示系统跟进')],
     columns: [col('follower', '跟进人'), col('department', '跟进部门'), col('customerName', '跟进客户'), col('mobile', '客户电话'), col('wechat', '微信'), col('appointment', '是否预约'), col('dueDate', '预产期'), col('source', '客户来源'), col('status', '跟进状态', 100, true), col('followType', '跟进类型'), col('contactType', '跟进方式'), col('content', '跟进内容', 220), col('followedAt', '跟进时间', 150), col('nextFollowAt', '下次跟进时间', 150), col('nextContent', '下次跟进内容', 180), col('attachment', '附件')], formFields: followForm
   },
   '签单客户': {
     key: 'signed-customers', icon: 'el-icon-document-checked', description: '集中查看已签约客户、合同签订日期、客户等级及欠款授权。',
-    actions: ['导出', '欠款授权', '客户跟踪', '打印'], filters: [input('name', '客户姓名'), input('mobile', '手机号'), input('wechat', '微信(QQ)'), input('status', '客户状态'), select('source', '客户来源', customerSources), select('store', '意向分店', stores), dateRange('dueRange', '预产期'), input('salesperson', '销售员'), input('unfollowedDays', '未跟踪天数'), input('creator', '登记人'), dateRange('createdRange', '录入日期'), input('tags', '标签'), input('memo', '备忘录'), dateRange('signedRange', '合同签订日期')],
+    actions: ['导出', '欠款授权', '客户跟进', '打印'], filters: [input('name', '客户姓名'), input('mobile', '手机号'), input('wechat', '微信(QQ)'), input('status', '客户状态'), select('source', '客户来源', customerSources), select('store', '意向分店', stores), dateRange('dueRange', '预产期'), input('salesperson', '销售员'), input('unfollowedDays', '未跟进天数'), input('creator', '登记人'), dateRange('createdRange', '录入日期'), input('tags', '标签'), input('memo', '备忘录'), dateRange('signedRange', '合同签订日期')],
     columns: [...customerBaseColumns, col('levelScore', '客户等级值'), col('autoLevel', '是否自动升降级', 125), col('customerLevel', '客户等级'), col('pregnancyCount', '胎次'), col('sharedBy', '共享人'), col('address', '地址', 180), col('signedAt', '签订日期', 120), col('contractMobile', '手机号', 125)], formFields: followForm
   },
   '预约参观': {
@@ -68,8 +84,8 @@ export const customerPageConfigs = {
     formFields: [input('visitor', '预约人'), input('mobile', '联系电话'), input('wechat', '微信号(QQ)'), select('source', '了解途径', customerSources), input('visitorCount', '参观人数'), input('receptionist', '接待人'), input('vehicle', '车辆信息'), date('appointmentAt', '预约时间', 'datetime'), select('store', '参观分店', stores), input('appointmentType', '预约类型'), input('tastingCount', '试吃人数'), date('tastingAt', '试吃时间', 'datetime'), textarea('menu', '试吃菜单'), textarea('remark', '备注')]
   },
   '公海客户': {
-    key: 'public-customers', icon: 'el-icon-s-opportunity', description: '管理无明确归属或已回收客资，支持抢单、分配和重新跟踪。',
-    actions: ['添加', '编辑', '删除', '客资分配', '客户跟踪', '抢单', '导出'], filters: [input('name', '客户姓名'), input('mobile', '手机号'), dateRange('createdRange', '录入时间')], columns: customerBaseColumns.slice(0, 20), formFields: followForm
+    key: 'public-customers', icon: 'el-icon-s-opportunity', description: '管理无明确归属或已回收客资，支持抢单、分配和重新跟进。',
+    actions: ['添加', '编辑', '删除', '客资分配', '客户跟进', '抢单', '导出'], filters: [input('name', '客户姓名'), input('mobile', '手机号'), dateRange('createdRange', '录入时间')], columns: customerBaseColumns.slice(0, 20), formFields: followForm
   },
   '入住探访记录': {
     key: 'visits', icon: 'el-icon-house', description: '登记客户入住期间家属或访客的探访信息。',

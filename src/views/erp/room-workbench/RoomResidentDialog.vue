@@ -9,14 +9,6 @@
     custom-class="resident-detail-dialog"
     @update:visible="$emit('update:visible', $event)"
   >
-    <el-alert
-      title="住户基本资料与合同摘要来自 MySQL；暂无业务记录的页签保持为空。"
-      type="info"
-      :closable="false"
-      show-icon
-      class="resident-alert"
-    />
-
     <el-tabs v-model="activeTab" type="card" class="resident-tabs">
       <el-tab-pane v-for="tab in tabs" :key="tab" :label="tab" :name="tab">
         <template v-if="tab === '客户详细信息'">

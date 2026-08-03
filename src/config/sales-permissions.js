@@ -53,7 +53,8 @@ const resourcePermissions = {
       导出: 19,
       审核: 21,
       停用: 35,
-      反审核: 49
+      反审核: 49,
+      核销: 'SALES.DISCOUNT.CONSUME'
     }
   },
   'card-packages': {
@@ -84,7 +85,7 @@ const resourcePermissions = {
   },
   coupons: {
     navId: 534,
-    actions: { 添加: 1, 删除: 3, 编辑: 10, 分发: 95 }
+    actions: { 添加: 1, 删除: 3, 编辑: 10, 导出: 19, 分发: 95 }
   },
   'gift-applications': {
     navId: 556,

@@ -34,13 +34,29 @@ router.beforeEach(async(to, from, next) => {
         try {
           // get user info
           // note: roles must be a object array! such as: ['admin'] or ,['developer','editor']
-          const { roles } = await store.dispatch('user/getInfo')
+          const { roles, storeIds = [] } = await store.dispatch('user/getInfo')
+          if (!roles.includes('SYS_ADMIN') && storeIds.length) {
+            store.dispatch('app/setCurrentStore', String(storeIds[0]))
+          }
 
           // generate accessible routes map based on roles
           const accessRoutes = await store.dispatch('permission/generateRoutes', roles)
 
           // dynamically add accessible routes
           router.addRoutes(accessRoutes)
+
+          // A login redirect can point to a page from the previous account.
+          // After rebuilding routes for the new role, do not let that stale
+          // target fall through the catch-all route and strand the user on
+          // the 404 page.  Every authenticated role can safely start from the
+          // evidence-backed dashboard instead.
+          const matchedRoute = router.match(to.fullPath)
+          const hitsCatchAll = (matchedRoute.matched || []).some(record => record.path === '*')
+          const resolvesToNotFound = matchedRoute.path === '/404' && to.path !== '/404'
+          if (hitsCatchAll || resolvesToNotFound) {
+            next({ path: '/dashboard', replace: true })
+            return
+          }
 
           // hack method to ensure that addRoutes is complete
           // set the replace: true, so the navigation will not leave a history record

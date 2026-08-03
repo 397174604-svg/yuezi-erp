@@ -8,14 +8,6 @@
     :close-on-click-modal="false"
     custom-class="nursing-toolbar-dialog"
   >
-    <el-alert
-      title="当前为脱敏交互演示，确定操作不会写入原妈妈宝盒 ERP。"
-      type="warning"
-      :closable="false"
-      show-icon
-      class="mock-tip"
-    />
-
     <template v-if="isPlanForm">
       <el-form label-width="126px" size="small">
         <el-row :gutter="14">
@@ -39,8 +31,8 @@
           <el-col :span="24">
             <el-form-item label="产妇出院诊断："><el-input v-model="form.diagnosis" type="textarea" :rows="3" /></el-form-item>
           </el-col>
-          <el-col :span="12"><el-form-item label="制单人："><el-input value="admin（演示）" readonly /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item label="制单日期："><el-input value="2026-07-24" readonly /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="制单人："><el-input value="当前登录账号" readonly /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="制单日期："><el-input :value="today" readonly /></el-form-item></el-col>
         </el-row>
       </el-form>
     </template>
@@ -115,10 +107,17 @@
             <el-form-item :label="field.label" :required="field.required">
               <el-input v-if="field.type === 'input'" v-model="form[field.key]" />
               <el-input v-else-if="field.type === 'textarea'" v-model="form[field.key]" type="textarea" :rows="3" />
-              <el-select v-else-if="field.type === 'select'" v-model="form[field.key]" class="full-control">
+              <el-select v-else-if="field.type === 'select'" v-model="form[field.key]" class="full-control" @change="field.key === 'store' ? handleStoreChange() : null">
                 <el-option v-for="item in field.options" :key="item" :label="item" :value="item" />
               </el-select>
+              <el-select v-else-if="field.type === 'customer-select'" v-model="form.customerName" filterable clearable class="full-control" :disabled="!form.store || referenceOptionsLoading" @change="syncCustomerRoom">
+                <el-option v-for="item in referenceOptions.customers" :key="item.id" :label="`${item.name} · ${item.room || '未分房'}`" :value="item.name" />
+              </el-select>
+              <el-select v-else-if="field.type === 'room-select'" v-model="form.room" filterable clearable class="full-control" :disabled="!form.store || referenceOptionsLoading">
+                <el-option v-for="item in referenceOptions.rooms" :key="item.id" :label="`${item.room} · ${item.roomType || '未设置房型'}`" :value="item.room" />
+              </el-select>
               <el-date-picker v-else-if="field.type === 'date'" v-model="form[field.key]" type="datetime" value-format="yyyy-MM-dd HH:mm" class="full-control" />
+              <el-input-number v-else-if="field.type === 'number'" v-model="form[field.key]" :min="field.min || 0" class="full-control" />
               <el-checkbox v-else-if="field.type === 'checkbox'" v-model="form[field.key]">{{ field.text }}</el-checkbox>
               <el-upload v-else-if="field.type === 'upload'" action="#" :auto-upload="false"><el-button size="small">选择文件</el-button></el-upload>
             </el-form-item>
@@ -155,7 +154,14 @@
 </template>
 
 <script>
+import { getNursingStoreReferenceOptions } from '@/api/erp-nursing'
+
 const stores = ['中心广场旗舰店', '黄河路轻奢店']
+const withRequiredStore = fields => (
+  fields.some(field => field.key === 'store')
+    ? fields
+    : [{ key: 'store', label: '门店：', type: 'select', options: stores, required: true }, ...fields]
+)
 
 const pageFields = {
   护理部排班第二版: [
@@ -176,7 +182,9 @@ const pageFields = {
     { key: 'remark', label: '备注：', type: 'textarea', span: 24 }
   ],
   健康评估: [
-    { key: 'customerName', label: '客户姓名：', type: 'input', required: true },
+    { key: 'store', label: '门店：', type: 'select', options: stores, required: true },
+    { key: 'customerName', label: '客户姓名：', type: 'customer-select', required: true },
+    { key: 'room', label: '房间号：', type: 'room-select' },
     { key: 'babyName', label: '宝宝姓名：', type: 'input' },
     { key: 'assessmentAt', label: '评估时间：', type: 'date', required: true },
     { key: 'assessor', label: '评估人员：', type: 'input', required: true },
@@ -238,6 +246,8 @@ const pageFields = {
     { key: 'attachment', label: '附件：', type: 'upload', span: 24 }
   ],
   宝宝护理记录: [
+    { key: 'store', label: '门店：', type: 'select', options: stores, required: true },
+    { key: 'customerName', label: '客户姓名：', type: 'customer-select', required: true },
     { key: 'recordAt', label: '记录日期：', type: 'date' },
     { key: 'babyName', label: '宝宝姓名：', type: 'input' },
     { key: 'temperature', label: '体温(C°)：', type: 'input' },
@@ -256,8 +266,9 @@ const pageFields = {
     { key: 'remark', label: '备注：', type: 'textarea', span: 24 }
   ],
   入住物品交接: [
-    { key: 'customerName', label: '客户姓名：', type: 'input', required: true },
-    { key: 'room', label: '房间号：', type: 'input' },
+    { key: 'store', label: '门店：', type: 'select', options: stores, required: true },
+    { key: 'customerName', label: '客户姓名：', type: 'customer-select', required: true },
+    { key: 'room', label: '房间号：', type: 'room-select' },
     { key: 'handoverAt', label: '交接日期：', type: 'date' },
     { key: 'items', label: '交接物品：', type: 'textarea', span: 24 },
     { key: 'staff', label: '交接人员：', type: 'input' },
@@ -266,23 +277,34 @@ const pageFields = {
   ]
 }
 
+const PAGE_FIELD_ALIAS = {
+  '护理评估（产后恢复）': '健康评估',
+  护理看板: '护理部排班第二版',
+  '入住交接（物品清点）': '入住物品交接',
+  宝宝日志: '宝宝护理记录'
+}
+
 export default {
   name: 'NursingToolbarDialog',
   props: {
     visible: { type: Boolean, default: false },
     pageTitle: { type: String, default: '' },
     action: { type: String, default: '' },
-    row: { type: Object, default: () => ({}) }
+    row: { type: Object, default: () => ({}) },
+    formFields: { type: Array, default: () => [] }
   },
   data() {
     return {
       stores,
+      today: new Date().toISOString().slice(0, 10),
       form: {},
       pickerVisible: false,
       selectedCustomer: null,
       settingTab: '套餐内服务',
       settingTabs: ['套餐内服务', '套餐外服务', '额外购买', '项目卡', '储值卡'],
       settingProject: null,
+      referenceOptions: { customers: [], rooms: [] },
+      referenceOptionsLoading: false,
       projectRows: [
         { projectName: '母婴基础护理（演示）', projectType: '护理服务', quantity: 10, remaining: 8, validDays: 28, startDate: '2026-07-18', remainingDays: 22 },
         { projectName: '产后舒缓护理（演示）', projectType: '产康服务', quantity: 6, remaining: 5, validDays: 28, startDate: '2026-07-18', remainingDays: 22 }
@@ -325,24 +347,25 @@ export default {
       return `${this.action}${this.pageTitle}`
     },
     genericFields() {
+      if (this.formFields.length) return withRequiredStore(this.formFields)
       if (this.action === '护士回复') {
-        return [
+        return withRequiredStore([
           { key: 'replyAt', label: '回复日期：', type: 'date', required: true },
           { key: 'reply', label: '护士回复：', type: 'textarea', span: 24, required: true }
-        ]
+        ])
       }
       if (this.action === '确认签收') {
-        return [
+        return withRequiredStore([
           { key: 'customerName', label: '客户姓名：', type: 'input' },
           { key: 'signedAt', label: '签收时间：', type: 'date', required: true },
           { key: 'signer', label: '签收人：', type: 'input', required: true },
           { key: 'customerConfirm', label: '客户确认：', type: 'checkbox', text: '确认已收到全部物品' }
-        ]
+        ])
       }
-      return pageFields[this.pageTitle] || [
+      return withRequiredStore(pageFields[PAGE_FIELD_ALIAS[this.pageTitle] || this.pageTitle] || [
         { key: 'name', label: '名称：', type: 'input', required: true },
         { key: 'remark', label: '备注：', type: 'textarea', span: 24 }
-      ]
+      ])
     }
   },
   watch: {
@@ -355,7 +378,7 @@ export default {
       const next = {
         customerName: this.row.customerName || '',
         room: this.row.room || '',
-        store: this.row.store || stores[0],
+        store: this.row.store || '',
         serviceTypes: [],
         serviceForm: '请选择',
         practiceType: '月嫂',
@@ -367,8 +390,16 @@ export default {
         remark: ''
       }
       this.planRoleFields.forEach(field => { next[field.key] = this.row[field.key] || '' })
+      this.genericFields.forEach(field => {
+        if (Object.prototype.hasOwnProperty.call(next, field.key)) return
+        const current = this.row[field.key]
+        next[field.key] = current !== undefined
+          ? current
+          : (field.type === 'number' ? (field.min || 0) : '')
+      })
       this.form = next
       this.settingProject = null
+      this.loadStoreReferenceOptions()
     },
     selectDemoStaff(key) {
       this.$set(this.form, key, '演示员工01')
@@ -381,6 +412,34 @@ export default {
       this.$set(this.form, 'customerName', this.selectedCustomer.name)
       this.pickerVisible = false
     },
+    async handleStoreChange() {
+      this.form.customerName = ''
+      this.form.room = ''
+      await this.loadStoreReferenceOptions()
+    },
+    async loadStoreReferenceOptions() {
+      if (!this.form.store) {
+        this.referenceOptions = { customers: [], rooms: [] }
+        return
+      }
+      this.referenceOptionsLoading = true
+      try {
+        const response = await getNursingStoreReferenceOptions({ store: this.form.store })
+        this.referenceOptions = {
+          customers: response.data.customers || [],
+          rooms: response.data.rooms || []
+        }
+      } catch (error) {
+        this.referenceOptions = { customers: [], rooms: [] }
+        this.$message.warning(error.message || '无法加载当前门店客户和房间')
+      } finally {
+        this.referenceOptionsLoading = false
+      }
+    },
+    syncCustomerRoom(customerName) {
+      const customer = this.referenceOptions.customers.find(item => item.name === customerName)
+      if (customer && customer.room) this.form.room = customer.room
+    },
     save() {
       if (this.action === '移动') {
         if (!this.form.moveProjects.length) return this.$message.warning('请选择要移动的项目')
@@ -389,6 +448,18 @@ export default {
       if (this.action === '月嫂分配') {
         if (!this.form.matronName) return this.$message.warning('请选择护理师！')
         if (!this.form.serviceTypes.length) return this.$message.warning('请选择服务类型！')
+      }
+      const specialForm = this.isPlanForm ||
+        (this.action === '设置' && this.pageTitle === '护理计划') ||
+        ['月嫂分配', '移动'].includes(this.action)
+      const missing = this.genericFields.find(field => (
+        field.required &&
+        (this.form[field.key] === '' || this.form[field.key] === null ||
+          this.form[field.key] === undefined ||
+          (field.type === 'number' && Number(this.form[field.key]) < (field.min || 0)))
+      ))
+      if (!specialForm && missing) {
+        return this.$message.warning(`请填写${missing.label.replace('：', '')}`)
       }
       this.$emit('saved', { action: this.action, form: { ...this.form }})
       this.innerVisible = false

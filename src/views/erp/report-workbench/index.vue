@@ -2,15 +2,27 @@
   <div class="report-workbench">
     <section class="hero-panel">
       <div>
-        <div class="eyebrow"><i class="el-icon-data-analysis" /> 查询报表 · 独立工作台草案</div>
+        <div class="eyebrow"><i class="el-icon-data-analysis" /> 查询报表 · 经营数据分析</div>
         <h1>{{ pageTitle }}</h1>
         <p>{{ config.description }}</p>
       </div>
       <div class="hero-status">
-        <el-tag type="warning" effect="dark">待原系统二次核验</el-tag>
+        <el-tag :type="config.dataState === 'pending' ? 'warning' : 'success'" effect="dark">{{ dataStateLabel }}</el-tag>
         <span>{{ config.family }}类报表</span>
       </div>
     </section>
+
+    <section v-if="config.presentation === 'report-builder'" class="report-mode-card builder-mode">
+      <div><i class="el-icon-set-up" /><strong>自定义报表入口</strong><p>当前仅开放已接入数据的筛选、查询和 CSV 导出。自定义字段、公式、图表和打印模板尚未接入，不展示模拟预览。</p></div>
+      <div class="mode-steps"><span>选择已接入报表</span><i class="el-icon-right" /><span>配置筛选条件</span><i class="el-icon-right" /><span>导出当前结果</span></div>
+    </section>
+
+    <section v-if="config.presentation === 'monthly-operation'" class="report-mode-card monthly-mode">
+      <div><i class="el-icon-date" /><strong>经营月报口径</strong><p>以本月已落库收款为基础汇总；退款、付款、成本在对应真实流水未接入前保持为空或零值。</p></div>
+      <div class="mode-steps"><span>门店范围</span><i class="el-icon-right" /><span>统计月份</span><i class="el-icon-right" /><span>月度导出</span></div>
+    </section>
+
+    <el-alert v-if="config.presentation === 'pending'" title="该报表的数据口径正在确认，暂不展示未经确认的汇总结果。" type="info" :closable="false" show-icon class="evidence-alert" />
 
     <el-alert
       :title="evidenceMessage"
@@ -38,8 +50,8 @@
       </div>
       <div class="audit-card">
         <span>完成等级</span>
-        <strong>Visible</strong>
-        <small>Mock 演示，未接真实后端</small>
+        <strong>Query</strong>
+        <small>按当前筛选范围查询</small>
       </div>
     </section>
 
@@ -117,10 +129,13 @@
     <el-card shadow="never" class="content-card table-card">
       <div slot="header" class="card-heading">
         <div>
-          <h2>报表数据 <el-tag size="mini" type="info">脱敏演示</el-tag></h2>
-          <p>未启用汇总行、公式、导出或打印；这些能力必须以原 ERP 证据为准</p>
+          <h2>报表数据 <el-tag size="mini" type="success">实时</el-tag></h2>
+          <p>当前结果支持 CSV 导出；汇总公式和打印版式仍待业务口径确认</p>
         </div>
-        <span class="result-count">共 {{ filteredRows.length }} 条演示记录</span>
+        <div class="query-actions">
+          <span class="result-count">共 {{ filteredRows.length }} 条记录</span>
+          <el-button size="small" icon="el-icon-download" :disabled="!filteredRows.length" @click="exportRows">导出当前结果</el-button>
+        </div>
       </div>
       <el-table
         v-loading="loading"
@@ -177,6 +192,7 @@ import {
   REPORT_REPOSITORY_MENU_COUNT
 } from '@/config/report-pages'
 import { getReportModuleData } from '@/api/erp-report'
+import { mapGetters } from 'vuex'
 
 export default {
   name: 'ReportWorkbench',
@@ -185,6 +201,7 @@ export default {
       filters: {},
       rows: [],
       loading: false,
+      loadSequence: 0,
       pagination: {
         page: 1,
         size: 10
@@ -206,14 +223,18 @@ export default {
     }
   },
   computed: {
+    ...mapGetters(['currentStoreId']),
     pageTitle() {
-      return this.$route.meta.title
+      return String(this.$route.meta.configTitle || this.$route.meta.title || '').replace(/\s*★\s*$/, '')
     },
     config() {
       return getReportPageConfig(this.pageTitle)
     },
     evidenceMessage() {
       return `当前仓库“查询报表”菜单仅有 ${this.repositoryMenuCount} 项，与任务要求的 ${this.expectedMenuCount} 项相差 1 项；本页筛选、列、枚举、公式、导出与打印均待原系统二次核验。`
+    },
+    dataStateLabel() {
+      return this.config.dataState === 'pending' ? '口径确认中' : '经营数据查询'
     },
     filteredRows() {
       const entries = Object.entries(this.filters).filter(([, value]) => {
@@ -255,76 +276,58 @@ export default {
       this.config.filters.forEach(item => {
         next[item.key] = item.type === 'dateRange' ? [] : ''
       })
+      const routeStoreId = Number(this.$route.query.storeId)
+      const routeStores = { 1: '中心广场旗舰店', 2: '黄河路轻奢店' }
+      if (next.store !== undefined && routeStores[routeStoreId]) {
+        next.store = routeStores[routeStoreId]
+      }
       this.filters = next
       this.pagination.page = 1
     },
     async loadData() {
+      const sequence = ++this.loadSequence
+      const resource = this.config.key
       this.loading = true
       try {
-        const response = await getReportModuleData(this.config.key, this.filters)
-        const list = response.data && response.data.list
-        this.rows = list && list.length ? list : this.createDemoRows()
-      } catch (error) {
-        this.rows = this.createDemoRows()
-      } finally {
-        this.loading = false
-      }
-    },
-    runQuery(action) {
-      this.pagination.page = 1
-      this.$message.success(`${action}仅执行本地脱敏演示筛选，原系统查询规则待二次核验`)
-    },
-    createDemoRows() {
-      return Array.from({ length: 12 }, (_, index) => {
-        const row = { id: `${this.config.key}-${index + 1}` }
-        this.config.columns.forEach(item => {
-          row[item.key] = this.sampleValue(item, index)
+        const response = await getReportModuleData(resource, {
+          ...this.filters,
+          storeId: this.currentStoreId || 'all'
         })
-        return row
-      })
-    },
-    sampleValue(item, index) {
-      if (item.format === 'money') return `¥ ${(1200 + index * 185).toLocaleString('zh-CN')}`
-      if (item.format === 'count') return 3 + index
-      if (item.format === 'percent') return `${72 + index % 8}.0%`
-      const letter = String.fromCharCode(65 + index % 6)
-      const samples = {
-        statDate: `2026-07-${String(10 + index).padStart(2, '0')}`,
-        saleDate: `2026-07-${String(10 + index).padStart(2, '0')}`,
-        consumeDate: `2026-07-${String(10 + index).padStart(2, '0')}`,
-        receiptDate: `2026-07-${String(10 + index).padStart(2, '0')}`,
-        serviceDate: `2026-07-${String(10 + index).padStart(2, '0')}`,
-        recordDate: `2026-07-${String(10 + index).padStart(2, '0')}`,
-        rechargeDate: `2026-07-${String(10 + index).padStart(2, '0')}`,
-        checkoutDate: `2026-07-${String(10 + index).padStart(2, '0')}`,
-        transactionDate: `2026-07-${String(10 + index).padStart(2, '0')}`,
-        shareDate: `2026-07-${String(10 + index).padStart(2, '0')}`,
-        plannedCheckInDate: `2026-08-${String(3 + index).padStart(2, '0')}`,
-        plannedCheckOutDate: `2026-08-${String(15 + index).padStart(2, '0')}`,
-        statMonth: '2026-07',
-        statPeriod: '2026-07',
-        store: index % 2 ? '黄河路轻奢店' : '中心广场旗舰店',
-        sourceStore: index % 2 ? '中心广场旗舰店' : '黄河路轻奢店',
-        customerName: `演示客户${letter}`,
-        babyName: `演示宝宝${letter}`,
-        salesperson: `演示员工${letter}`,
-        serviceStaff: `演示员工${letter}`,
-        technician: `演示技师${letter}`,
-        operator: `演示员工${letter}`,
-        receiver: `演示员工${letter}`,
-        referrer: `演示推荐人${letter}`,
-        roomNo: `${2 + index % 4}0${1 + index % 8}`,
-        contractNo: `HT-DEMO-${String(index + 1).padStart(4, '0')}`,
-        documentNo: `DJ-DEMO-${String(index + 1).padStart(4, '0')}`,
-        cardNo: `CARD-DEMO-${String(index + 1).padStart(4, '0')}`,
-        department: '演示部门',
-        serviceName: '演示服务项目',
-        itemName: '演示商品',
-        productName: '演示商品',
-        contentTitle: '演示分享内容',
-        remark: '仅用于页面演示'
+        const list = response.data && response.data.list
+        if (this.loadSequence !== sequence) return false
+        this.rows = Array.isArray(list) ? list : []
+        return true
+      } catch (error) {
+        if (this.loadSequence !== sequence) return false
+        this.rows = []
+        this.$message.error('报表查询失败，请稍后重试')
+        return false
+      } finally {
+        if (this.loadSequence === sequence) this.loading = false
       }
-      return Object.prototype.hasOwnProperty.call(samples, item.key) ? samples[item.key] : '演示值'
+    },
+    async runQuery(action) {
+      this.pagination.page = 1
+      const loaded = await this.loadData()
+      if (!loaded) return this.$message.warning('查询未完成，请检查条件后重试')
+      if (loaded) {
+        this.$message.success(`${action}已按当前门店和查询条件刷新`)
+      }
+    },
+    exportRows() {
+      if (!this.filteredRows.length) return
+      const columns = this.config.columns
+      const escape = value => `"${String(value === null || value === undefined ? '' : value).replace(/"/g, '""')}"`
+      const lines = [
+        columns.map(column => escape(column.label)).join(','),
+        ...this.filteredRows.map(row => columns.map(column => escape(row[column.key])).join(','))
+      ]
+      const blob = new Blob([`\uFEFF${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' })
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = `${this.pageTitle}-${new Date().toISOString().slice(0, 10)}.csv`
+      link.click()
+      URL.revokeObjectURL(link.href)
     },
     tableIndex(index) {
       return (this.pagination.page - 1) * this.pagination.size + index + 1
@@ -347,12 +350,12 @@ export default {
   padding: 25px 28px;
   border-radius: 15px;
   color: #fff;
-  background: linear-gradient(128deg, #315db8, #548ff0 62%, #62a8ef);
-  box-shadow: 0 13px 30px rgba(52, 93, 172, .2);
+  background: linear-gradient(125deg, #28241e 0%, #5f4b2d 56%, #a68045 100%);
+  box-shadow: 0 14px 34px rgba(74, 55, 26, .2);
 }
 .eyebrow {
   margin-bottom: 9px;
-  color: #dceaff;
+  color: #f3dfb7;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: .6px;
@@ -412,6 +415,7 @@ export default {
   color: #9aa6b6;
   font-size: 11px;
 }
+.report-mode-card { display: flex; justify-content: space-between; align-items: center; gap: 22px; margin-top: 16px; padding: 17px 20px; border: 1px solid #dfe7ef; border-radius: 12px; background: #fff; }.report-mode-card > div:first-child { display: grid; grid-template-columns: 26px 1fr; column-gap: 10px; }.report-mode-card > div:first-child > i { grid-row: span 2; padding-top: 2px; color: #997037; font-size: 21px; }.report-mode-card strong { color: #46576a; font-size: 15px; }.report-mode-card p { grid-column: 2; margin: 5px 0 0; color: #738195; font-size: 12px; line-height: 1.55; }.builder-mode { border-left: 4px solid #b58635; }.monthly-mode { border-left: 4px solid #467f98; background: linear-gradient(90deg, #f7fbfe, #fff); }.mode-steps { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; color: #63758a; font-size: 12px; }.mode-steps span { padding: 7px 10px; border: 1px solid #dce4ed; border-radius: 16px; background: #fff; white-space: nowrap; }.mode-steps i { color: #b4863d; }
 .content-card {
   margin-top: 16px;
   border: 0;
@@ -503,5 +507,7 @@ export default {
   .audit-grid {
     grid-template-columns: 1fr;
   }
+  .report-mode-card { align-items: flex-start; flex-direction: column; }
+  .mode-steps { flex-wrap: wrap; }
 }
 </style>

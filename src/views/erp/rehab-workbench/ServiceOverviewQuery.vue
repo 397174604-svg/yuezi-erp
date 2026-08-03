@@ -508,17 +508,17 @@ export default {
 }
 
 .service-card ::v-deep .el-tabs__item.is-active {
-  color: #b64f7a;
+  color: #8c6a36;
 }
 
 .service-card ::v-deep .el-tabs__active-bar {
-  background: #b64f7a;
+  background: #b8945a;
 }
 
 .service-card ::v-deep .el-table th,
 .list-table-card ::v-deep .el-table th {
   color: #43536a;
-  background: #fbf5f8;
+  background: #f4ecdd;
 }
 
 .project-card-layout {

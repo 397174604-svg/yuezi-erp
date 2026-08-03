@@ -1,6 +1,8 @@
 <template>
   <div class="rehab-workbench">
-    <service-overview-query v-if="isServiceOverview" />
+    <recovery-operations-board v-if="isRecoveryFeaturePage" :config="featureConfig" />
+    <appointment-workbench v-else-if="isAppointmentPage" />
+    <service-overview-query v-else-if="isServiceOverview" />
 
     <template v-else>
       <audited-surface-panel
@@ -9,6 +11,15 @@
         show-action-icons
         @business-action="handleAction"
         @query-action="handleAuditedQueryAction"
+      />
+
+      <el-alert
+        v-if="isAppointmentPage"
+        class="appointment-rule"
+        type="info"
+        :closable="false"
+        show-icon
+        title="预约规则：预约日期不能早于今天；服务人员、门店和服务时段必填；同一服务人员的时间段不能重叠。"
       />
 
       <el-card shadow="never" class="content-card table-card">
@@ -92,10 +103,21 @@
 <script>
 import { mapGetters } from 'vuex'
 import { getRehabPageConfig } from '@/config/rehab-pages'
+import { getRecoveryFeaturePageConfig } from '@/config/recovery-feature-pages'
 import { canUseRecoveryAction, visibleRecoveryActions } from '@/config/rehab-permissions'
 import { getRehabModuleData, getRehabOptions, performRehabModuleAction, saveRehabModuleRecord } from '@/api/erp-rehab'
 import AuditedSurfacePanel from '@/views/erp/components/AuditedSurfacePanel'
+import AppointmentWorkbench from './AppointmentWorkbench'
 import ServiceOverviewQuery from './ServiceOverviewQuery'
+import RecoveryOperationsBoard from './RecoveryOperationsBoard'
+
+const FUTURE_DATE_OPTIONS = {
+  disabledDate(value) {
+    const startOfToday = new Date()
+    startOfToday.setHours(0, 0, 0, 0)
+    return value.getTime() < startOfToday.getTime()
+  }
+}
 
 const FieldControl = {
   name: 'FieldControl',
@@ -125,7 +147,10 @@ const FieldControl = {
           startPlaceholder: '开始日期',
           endPlaceholder: '结束日期',
           rangeSeparator: '至',
-          placeholder: `请选择${field.label}`
+          placeholder: `请选择${field.label}`,
+          pickerOptions: ['appointmentDate', 'scheduleDate'].includes(field.key)
+            ? FUTURE_DATE_OPTIONS
+            : undefined
         },
         on: { input: setValue }
       })
@@ -152,7 +177,7 @@ const FieldControl = {
 
 export default {
   name: 'RehabWorkbench',
-  components: { AuditedSurfacePanel, FieldControl, ServiceOverviewQuery },
+  components: { AppointmentWorkbench, AuditedSurfacePanel, FieldControl, ServiceOverviewQuery, RecoveryOperationsBoard },
   data() {
     return {
       loading: false,
@@ -176,22 +201,46 @@ export default {
     }
   },
   computed: {
-    ...mapGetters(['permissions', 'roles']),
+    ...mapGetters(['permissions', 'roles', 'currentStoreId']),
+    businessStoreId() {
+      return String(this.currentStoreId || 'all')
+    },
+    isAllStores() {
+      return this.businessStoreId === 'all'
+    },
+    businessStore() {
+      return this.recoveryOptions.stores.find(item => String(item.id) === this.businessStoreId) || null
+    },
     pageTitle() {
       return this.$route.meta.title
     },
+    configTitle() {
+      return this.$route.meta.configTitle || this.pageTitle
+    },
     config() {
-      return getRehabPageConfig(this.pageTitle)
+      return getRehabPageConfig(this.configTitle)
+    },
+    featureConfig() {
+      return getRecoveryFeaturePageConfig(this.configTitle)
+    },
+    isRecoveryFeaturePage() {
+      return Boolean(this.featureConfig)
     },
     isServiceOverview() {
-      return this.pageTitle === '服务综合查询'
+      return this.configTitle === '服务综合查询'
+    },
+    isAppointmentPage() {
+      return this.config.key === 'service-appointments'
     },
     permissionConfig() {
+      const configuredActions = this.isAppointmentPage
+        ? ['服务预约', '预约确认', '确认完成', '取消']
+        : this.config.actions
       return {
         ...this.config,
         actions: visibleRecoveryActions(
           this.config.key,
-          this.config.actions,
+          configuredActions,
           this.permissions,
           this.roles
         )
@@ -217,6 +266,9 @@ export default {
       handler() {
         this.initializePage()
       }
+    },
+    currentStoreId(value, previous) {
+      if (String(value) !== String(previous)) this.initializePage()
     }
   },
   methods: {
@@ -224,7 +276,11 @@ export default {
       this.pagination.page = 1
       this.selection = []
       this.resetFilters()
-      if (!this.isServiceOverview) {
+      if (this.isRecoveryFeaturePage) {
+        this.rows = []
+        return
+      }
+      if (!this.isServiceOverview && !this.isAppointmentPage) {
         this.loadOptions()
         this.loadData()
       }
@@ -244,7 +300,7 @@ export default {
     async loadData() {
       this.loading = true
       try {
-        const response = await getRehabModuleData(this.config.key, this.filters)
+        const response = await getRehabModuleData(this.config.key, { ...this.filters, storeId: this.businessStoreId })
         const list = response.data && response.data.list
         this.rows = Array.isArray(list) ? list : []
       } catch (error) {
@@ -304,6 +360,10 @@ export default {
       )
     },
     handleAction(action) {
+      if (this.isAllStores && !['导出', '打印', '查看详情'].includes(action)) {
+        this.$message.warning('全部门店仅支持汇总查询，请先在顶栏选择具体门店')
+        return
+      }
       if (action === '导出') return this.exportRows()
       if (action === '打印') return window.print()
       if (action === '查看详情') {
@@ -405,6 +465,7 @@ export default {
       })
     },
     openDialog(action, fields, row) {
+      if (this.isAllStores) return this.$message.warning('全部门店仅支持汇总查询，请先在顶栏选择具体门店')
       if (!fields.length) return this.$message.info('当前操作没有可填写字段')
       this.dialogTitle = action
       this.dialogAction = action
@@ -421,17 +482,34 @@ export default {
         if (!row && field.type === 'number') value = ['serviceCount', 'usedCount'].includes(field.key) ? 1 : 0
         this.$set(this.dialogForm, field.key, value)
       })
+      if (!row && this.businessStore) {
+        this.$set(this.dialogForm, 'storeId', this.businessStoreId)
+        if (this.dialogFields.some(field => field.key === 'store')) this.$set(this.dialogForm, 'store', this.businessStore.name)
+      }
       this.dialogVisible = true
     },
     async submitDialog() {
+      if (this.isAllStores) return this.$message.warning('全部门店仅支持汇总查询，请先在顶栏选择具体门店')
       const missing = this.dialogFields.filter(field => field.required && !this.dialogForm[field.key])
       if (missing.length) return this.$message.warning(`请填写：${missing.map(field => field.label).join('、')}`)
+      if (
+        this.isAppointmentPage &&
+        ['服务预约', '添加'].includes(this.dialogAction)
+      ) {
+        if (this.dialogForm.appointmentDate < this.currentDateText()) {
+          return this.$message.warning('预约日期不能早于今天')
+        }
+        const period = String(this.dialogForm.appointmentPeriod || '').trim()
+        const match = period.match(/^((?:[01]\d|2[0-3]):[0-5]\d)\s*-\s*((?:[01]\d|2[0-3]):[0-5]\d)$/)
+        if (!match) return this.$message.warning('预约时段格式应为 HH:mm-HH:mm')
+        if (match[1] >= match[2]) return this.$message.warning('预约结束时间必须晚于开始时间')
+      }
       this.saving = true
       try {
         if (['编辑', '添加', '服务预约'].includes(this.dialogAction)) {
-          await saveRehabModuleRecord(this.config.key, { id: this.currentRow && this.currentRow.id, ...this.dialogForm })
+          await saveRehabModuleRecord(this.config.key, { id: this.currentRow && this.currentRow.id, ...this.dialogForm, storeId: this.businessStoreId })
         } else {
-          await performRehabModuleAction(this.config.key, this.dialogAction, { id: this.currentRow && this.currentRow.id, ...this.dialogForm })
+          await performRehabModuleAction(this.config.key, this.dialogAction, { id: this.currentRow && this.currentRow.id, ...this.dialogForm, storeId: this.businessStoreId })
         }
         this.dialogVisible = false
         this.$message.success(`${this.dialogAction}成功`)
@@ -440,8 +518,14 @@ export default {
         this.saving = false
       }
     },
+    currentDateText() {
+      const now = new Date()
+      const offset = now.getTimezoneOffset() * 60000
+      return new Date(now.getTime() - offset).toISOString().slice(0, 10)
+    },
     async executeAction(action, row) {
-      await performRehabModuleAction(this.config.key, action, { id: row.id })
+      if (this.isAllStores) return this.$message.warning('全部门店仅支持汇总查询，请先在顶栏选择具体门店')
+      await performRehabModuleAction(this.config.key, action, { id: row.id, storeId: row.storeId || this.businessStoreId })
       this.$message.success(`${action}成功`)
       await this.loadData()
     },
@@ -495,13 +579,14 @@ export default {
 
 <style lang="scss" scoped>
 .rehab-workbench { min-height: calc(100vh - 84px); padding: 22px; color: #26354c; background: #f5f4f8; }
-.hero-panel { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 25px 30px; border-radius: 16px; color: white; background: linear-gradient(125deg, #763553 0%, #b64f7a 52%, #e77da4 100%); box-shadow: 0 14px 34px rgba(151, 59, 96, .23); }
-.eyebrow { margin-bottom: 9px; color: #ffe3ee; font-size: 13px; font-weight: 700; letter-spacing: .7px; }
+.hero-panel { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 25px 30px; border-radius: 16px; color: white; background: linear-gradient(125deg, #28241e 0%, #5f4b2d 56%, #a68045 100%); box-shadow: 0 14px 34px rgba(74, 55, 26, .2); }
+.eyebrow { margin-bottom: 9px; color: #f3dfb7; font-size: 13px; font-weight: 700; letter-spacing: .7px; }
 .hero-panel h1 { margin: 0 0 8px; font-size: 27px; }
-.hero-panel p { max-width: 760px; margin: 0; color: #ffe9f1; font-size: 14px; line-height: 1.7; }
+.hero-panel p { max-width: 760px; margin: 0; color: #f7efe0; font-size: 14px; line-height: 1.7; }
 .hero-status { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; }
 .evidence-alert { margin-top: 14px; border-radius: 10px; }
 .content-card { margin-top: 16px; border: 0; border-radius: 12px; }
+.appointment-rule { margin-top: 16px; border-radius: 10px; }
 .action-card ::v-deep .el-card__body { padding: 14px 18px; }
 .toolbar, .card-heading, .pagination-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
 .toolbar > span { flex: 0 0 auto; color: #8290a3; font-size: 12px; }
@@ -515,7 +600,7 @@ export default {
 .full-control { width: 100%; }
 .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 16px; }
 .summary-card { display: flex; align-items: center; gap: 15px; padding: 18px 20px; border: 1px solid #eee6eb; border-radius: 12px; background: white; }
-.summary-card > i { display: grid; width: 42px; height: 42px; border-radius: 12px; color: #b64f7a; background: #fce9f1; font-size: 20px; place-items: center; }
+.summary-card > i { display: grid; width: 42px; height: 42px; border-radius: 12px; color: #8c6a36; background: #f6efdf; font-size: 20px; place-items: center; }
 .summary-card strong, .summary-card span { display: block; }
 .summary-card strong { color: #9b3f66; font-size: 23px; }
 .summary-card span { margin-top: 3px; color: #7d8999; font-size: 12px; }

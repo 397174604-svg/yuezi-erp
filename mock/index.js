@@ -5,6 +5,7 @@ const user = require('./user')
 const role = require('./role')
 const article = require('./article')
 const search = require('./remote-search')
+const erpDemo = require('./erp-demo')
 const erpFoundation = require('./erp-foundation')
 const mamaBox = require('./mama-box')
 const erpCustomer = require('./erp-customer')
@@ -12,7 +13,9 @@ const erpSales = require('./erp-sales')
 const erpFinance = require('./erp-finance')
 const erpRoom = require('./erp-room')
 const erpNursing = require('./erp-nursing')
+const erpBaby = require('./erp-baby')
 const erpRehab = require('./erp-rehab')
+const erpResearch = require('./erp-research')
 const erpDiet = require('./erp-diet')
 const erpInventory = require('./erp-inventory')
 const erpMall = require('./erp-mall')
@@ -27,6 +30,7 @@ const mocks = [
   ...role,
   ...article,
   ...search,
+  ...erpDemo,
   ...erpFoundation,
   ...mamaBox,
   ...erpCustomer,
@@ -34,7 +38,9 @@ const mocks = [
   ...erpFinance,
   ...erpRoom,
   ...erpNursing,
+  ...erpBaby,
   ...erpRehab,
+  ...erpResearch,
   ...erpDiet,
   ...erpInventory,
   ...erpMall,

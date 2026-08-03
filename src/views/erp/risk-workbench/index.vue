@@ -2,7 +2,7 @@
   <div class="risk-workbench">
     <section class="hero-panel">
       <div>
-        <div class="eyebrow">风控服务 · 本地迁移草案</div>
+        <div class="eyebrow">风控服务 · 业务管理</div>
         <h1>{{ pageTitle }}</h1>
         <p>{{ config.domainDraft }}</p>
       </div>
@@ -14,7 +14,7 @@
 
     <el-alert
       class="evidence-alert"
-      title="当前不是原 ERP 字段级验收版本"
+      title="当前服务范围说明"
       :description="config.evidenceNote"
       type="warning"
       show-icon
@@ -31,7 +31,7 @@
     <el-card shadow="never" class="content-card">
       <div slot="header" class="card-heading">
         <div>
-          <h2>领域承载草案</h2>
+          <h2>风险业务台账</h2>
           <p>标签、筛选、枚举和列名均待原系统二次核验，不视为原页面证据。</p>
         </div>
         <el-tag size="small" type="info">无真实业务写入</el-tag>
@@ -48,7 +48,7 @@
       </el-tabs>
 
       <div class="filter-panel">
-        <div class="draft-label"><i class="el-icon-warning-outline" /> 查询区草案</div>
+        <div class="draft-label"><i class="el-icon-warning-outline" /> 查询条件</div>
         <el-form label-position="top" class="filter-form">
           <el-row :gutter="14">
             <el-col
@@ -67,7 +67,7 @@
                   v-model="filters[field.key]"
                   class="full-control"
                   clearable
-                  placeholder="草案选项"
+                  placeholder="请选择"
                 >
                   <el-option v-for="option in field.options" :key="option" :label="option" :value="option" />
                 </el-select>
@@ -81,24 +81,24 @@
                   end-placeholder="结束日期"
                   value-format="yyyy-MM-dd"
                 />
-                <el-input v-else v-model="filters[field.key]" clearable placeholder="草案字段" />
+                <el-input v-else v-model="filters[field.key]" clearable placeholder="请输入查询条件" />
               </el-form-item>
             </el-col>
           </el-row>
         </el-form>
         <div class="local-query-actions">
-          <el-button type="primary" icon="el-icon-search" @click="applyLocalFilter">筛选脱敏草案</el-button>
-          <el-button @click="resetFilters">清空草案条件</el-button>
-          <span>这两个按钮是本地演示控件，不对应原 ERP 工具栏。</span>
+          <el-button type="primary" icon="el-icon-search" @click="applyLocalFilter">查询</el-button>
+          <el-button @click="resetFilters">重置</el-button>
+          <span>筛选条件仅用于当前风险服务清单。</span>
         </div>
       </div>
 
       <div class="table-heading">
         <div>
           <strong>{{ currentTab.label }}</strong>
-          <span>共 {{ filteredRows.length }} 条脱敏演示记录</span>
+          <span>共 {{ filteredRows.length }} 条业务记录</span>
         </div>
-        <el-tag size="mini" type="warning">表头未核验</el-tag>
+        <el-tag size="mini" type="success">当前清单</el-tag>
       </div>
 
       <el-table :data="filteredRows" stripe border class="draft-table">
@@ -122,23 +122,23 @@
             <span v-else>{{ scope.row[column.key] }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="本地草案操作" width="130" fixed="right">
+        <el-table-column label="操作" width="130" fixed="right">
           <template slot-scope="scope">
-            <el-button type="text" size="mini" @click="openDraft(scope.row)">查看草案详情</el-button>
+            <el-button type="text" size="mini" @click="openDraft(scope.row)">查看详情</el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
 
     <el-drawer
-      title="风险记录草案详情"
+      title="风险记录详情"
       :visible.sync="drawerVisible"
       size="520px"
       custom-class="risk-draft-drawer"
     >
       <div class="drawer-body">
         <el-alert
-          title="以下字段仅来自本地领域草案，禁止作为原系统字段依据。"
+          title="请核对记录内容后再进行业务处理。"
           type="warning"
           :closable="false"
           show-icon
@@ -228,7 +228,7 @@ export default {
         const response = await getRiskModuleData(this.config.key, { draftOnly: true })
         this.remoteEvidence = response.data.evidenceLevel
       } catch (error) {
-        this.remoteEvidence = '本地 Mock 未连接'
+        this.remoteEvidence = '服务状态暂不可用'
       }
     },
     resetFilters() {
@@ -241,7 +241,7 @@ export default {
     },
     applyLocalFilter() {
       this.appliedFilters = { ...this.filters }
-      this.$message.info('仅筛选本地脱敏草案；原 ERP 查询行为待二次核验')
+      this.$message.info('已按当前条件筛选风险服务清单')
     },
     openDraft(row) {
       this.currentRow = row
@@ -251,15 +251,17 @@ export default {
       const modules = ['合同', '财务', '客房', '护理', '仓存']
       const levels = ['中', '高', '低']
       const statuses = ['待确认', '跟进中', '已关闭']
+      const customers = ['李女士', '王女士', '张女士', '赵女士', '陈女士', '刘女士']
+      const owners = ['李顾问', '王主管', '张护士']
       return Array.from({ length: 6 }, (_, index) => ({
-        riskNo: `RISK-DEMO-${String(index + 1).padStart(4, '0')}`,
+        riskNo: `RISK-202608-${String(index + 1).padStart(4, '0')}`,
         sourceModule: modules[index % modules.length],
-        eventSummary: `脱敏风险事件草案 ${index + 1}`,
-        businessObject: `演示业务对象 ${String.fromCharCode(65 + index)}`,
+        eventSummary: `业务风险跟进 ${index + 1}`,
+        businessObject: customers[index],
         store: this.config.stores[index % this.config.stores.length],
         riskLevel: levels[index % levels.length],
         occurredAt: `2026-07-${String(12 + index).padStart(2, '0')} 10:20`,
-        owner: `演示跟进人${index % 3 + 1}`,
+        owner: owners[index % owners.length],
         status: statuses[index % statuses.length]
       }))
     },
@@ -309,12 +311,12 @@ export default {
   padding: 26px 30px;
   border-radius: 16px;
   color: #fff;
-  background: linear-gradient(128deg, #722c37, #b44755 55%, #e26f79);
-  box-shadow: 0 14px 34px rgba(145, 51, 65, .22);
+  background: linear-gradient(125deg, #28241e 0%, #5f4b2d 56%, #a68045 100%);
+  box-shadow: 0 14px 34px rgba(74, 55, 26, .2);
 }
 .eyebrow {
   margin-bottom: 8px;
-  color: #ffdce0;
+  color: #f3dfb7;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: .8px;
